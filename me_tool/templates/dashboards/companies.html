@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% load me_format humanize %}
+{% block title %}Companies{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Companies</h1>
+    <p>Every service provider in {{ month.label }}. Open one for its dashboard and reports.</p>
+  </div>
+  <div class="page-actions">{% include "partials/month_nav.html" %}</div>
+</div>
+
+<div class="card card-flush">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Company</th><th>Status</th><th class="num">Services covered</th><th class="num">Visits</th>
+          <th class="num">Employees</th><th class="num">Amount</th><th>Share of spending</th><th class="num">Owed</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in rows %}
+        <tr>
+          <td><a href="{% url 'dashboards:company' row.company.id %}?{{ period_query }}">{{ row.company.name }}</a></td>
+          <td>
+            {% if row.company.deleted_at %}<span class="badge">Deleted</span>
+            {% elif not row.company.is_active %}<span class="badge at_risk">Deactivated</span>
+            {% else %}<span class="badge ok">Open</span>{% endif %}
+          </td>
+          <td class="num">{{ row.covered }} of {{ row.services }}</td>
+          <td class="num">{{ row.visits|intcomma }}</td>
+          <td class="num">{{ row.participants|intcomma }}</td>
+          <td class="num">{{ row.spend|rwf }}</td>
+          <td><div class="bar" title="{{ row.share|pct }}"><span style="width: {{ row.share|bar_width }}%"></span></div></td>
+          <td class="num">{{ row.unpaid|rwf }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="8" class="empty">No companies yet. Run a sync first.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

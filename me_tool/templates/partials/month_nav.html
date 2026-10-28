@@ -1,0 +1,24 @@
+{# Day / Week / Month switch, arrows, and a date picker for the chosen period #}
+<div class="period-nav">
+  {% if period_kinds %}
+    <div class="segmented" role="group" aria-label="Period">
+      {% for k in period_kinds %}<a href="{{ k.url }}" class="{% if k.active %}active{% endif %}" {% if k.active %}aria-current="true"{% endif %}>{{ k.label }}</a>{% endfor %}
+    </div>
+  {% endif %}
+  <div class="month-nav">
+    <a class="btn btn-sm" href="{{ previous_url }}" aria-label="Previous {{ period.unit }}">‹</a>
+    <form method="get">
+      {% for key, value in request.GET.items %}{% if key != "month" and key != "date" and key != "period" %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}{% endfor %}
+      <input type="hidden" name="period" value="{{ period.kind }}">
+      <label class="sr-only" for="period-picker">{{ period.unit|capfirst }}</label>
+      {% if period.kind == "month" %}
+        <input id="period-picker" type="month" name="date" value="{{ period.key }}" onchange="this.form.submit()">
+      {% else %}
+        <input id="period-picker" type="date" name="date" value="{{ period.start|date:'Y-m-d' }}" onchange="this.form.submit()"
+               title="{% if period.kind == 'week' %}Any day of the week{% else %}The day{% endif %}">
+      {% endif %}
+    </form>
+    {% if next_url %}<a class="btn btn-sm" href="{{ next_url }}" aria-label="Next {{ period.unit }}">›</a>{% else %}<span class="btn btn-sm disabled" aria-hidden="true">›</span>{% endif %}
+  </div>
+  {% if period.kind == "week" %}<span class="small muted">{{ period.label }}</span>{% endif %}
+</div>

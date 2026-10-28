@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% load me_format %}
+{% block title %}Indicators{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Indicators</h1>
+    <p>Targets vs actuals for {% if scope_company %}{{ scope_company.name }}{% else %}EUCL overall{% endif %} · {{ month.label }}</p>
+  </div>
+  <div class="page-actions">
+    {% if companies %}
+      <form method="get" class="form-row">
+        <input type="hidden" name="period" value="{{ period.kind }}"><input type="hidden" name="date" value="{{ period.url_value }}">
+        <label class="sr-only" for="company-filter">Company</label>
+        <select id="company-filter" name="company" onchange="this.form.submit()">
+          <option value="">EUCL overall</option>
+          {% for c in companies %}<option value="{{ c.id }}" {% if c.id == company_id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+        </select>
+      </form>
+    {% endif %}
+    {% include "partials/month_nav.html" %}
+    {% if access.can_manage_targets %}
+      <a class="btn btn-sm btn-primary" href="{% url 'indicators:targets' %}?{{ period_query }}{% if company_id %}&company={{ company_id }}{% endif %}">Set targets</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card"><div class="card-body status-strip">
+  <span class="badge on_track">{{ summary.on_track }} on track</span>
+  <span class="badge at_risk">{{ summary.at_risk }} at risk (within 10% of the target)</span>
+  <span class="badge off_track">{{ summary.off_track }} off track</span>
+  <span class="badge">{{ summary.no_target }} without a target</span>
+  {% if summary.no_data %}<span class="badge">{{ summary.no_data }} without data</span>{% endif %}
+</div></div>
+
+<div class="grid-2">
+{% for row in rows %}
+  <div class="card">
+    <div class="card-head">
+      <div>
+        <h2>{{ row.indicator.name }}</h2>
+        <p>{{ row.indicator.description }} {{ row.indicator.get_direction_display }}.</p>
+      </div>
+      <span class="badge {{ row.status }}">{{ row.status_label }}</span>
+    </div>
+    <div class="card-body">
+      <div class="form-row" style="justify-content: space-between; margin-bottom: 10px">
+        <div><div class="kpi-label">Actual</div><div class="kpi-value" style="font-size:22px">{{ row.actual|unit_value:row.indicator.unit }}</div></div>
+        <div><div class="kpi-label">Target</div><div class="kpi-value" style="font-size:22px">{{ row.target|unit_value:row.indicator.unit }}</div></div>
+        <div><div class="kpi-label">Baseline</div><div class="kpi-value muted" style="font-size:22px">{{ row.baseline|unit_value:row.indicator.unit }}</div></div>
+      </div>
+      {% if row.achievement is not None %}
+        <div class="bar {{ row.status }}" title="{{ row.achievement|pct:0 }} of the target"><span style="width: {{ row.achievement|bar_width }}%"></span></div>
+        <p class="small muted" style="margin:6px 0 12px">{{ row.achievement|pct:0 }} of the target</p>
+      {% endif %}
+      <div class="chart-box short"><canvas data-chart="{{ row.chart_id }}" aria-label="{{ row.indicator.name }}: last 6 months"></canvas></div>
+    </div>
+  </div>
+  {{ row.chart|json_script:row.chart_id }}
+{% endfor %}
+</div>
+{% endblock %}

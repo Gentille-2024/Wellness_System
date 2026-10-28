@@ -1,0 +1,95 @@
+# EUCL Wellness M&E tool
+#
+#   docker compose up -d --build         start everything
+#   docker compose logs -f web worker    watch the logs
+#   docker compose exec web python manage.py sync_wellness      sync now
+#
+# Two networks on their own subnets:
+#   me_internal  (internal: no way in or out) database, Redis and the app containers
+#   me_edge      the web app's published port, and the way out to the wellness API
+# PostgreSQL and Redis are only on me_internal, so nothing outside can reach them.
+
+x-app: &app
+  build: .
+  image: eucl-wellness-me:latest
+  env_file: .env
+  restart: unless-stopped
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  networks: [me_internal, me_edge]
+  extra_hosts:
+    # lets the containers reach a wellness system running on this computer
+    - "host.docker.internal:host-gateway"
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-me_tool}
+      POSTGRES_USER: ${POSTGRES_USER:-me_tool}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      me_internal:
+        ipv4_address: 172.28.10.10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      me_internal:
+        ipv4_address: 172.28.10.11
+
+  web:
+    <<: *app
+    command: ["web"]
+    ports:
+      - "${ME_PORT:-8100}:8000"
+    volumes:
+      - media:/app/media
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    <<: *app
+    command: ["worker"]
+    volumes:
+      - media:/app/media
+
+  beat:
+    <<: *app
+    command: ["beat"]
+
+volumes:
+  pgdata:
+  media:
+
+networks:
+  me_internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.28.10.0/24
+  me_edge:
+    ipam:
+      config:
+        - subnet: 172.28.20.0/24

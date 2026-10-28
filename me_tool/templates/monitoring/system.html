@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% load me_format humanize %}
+{% block title %}System resources{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>System resources</h1>
+    <p>Server, database growth and the services the M&amp;E tool depends on. Measured now; the history is saved every few minutes.</p>
+  </div>
+  <form method="post" action="{% url 'monitoring:measure' %}" class="page-actions">
+    {% csrf_token %}
+    <span class="badge {{ overall }}">{% if overall == "ok" %}All OK{% elif overall == "warn" %}Needs attention{% else %}Something is down{% endif %}</span>
+    <button class="btn btn-sm" type="submit">Measure now</button>
+  </form>
+</div>
+
+{# ---------------------------------------------------------------- checks #}
+<div class="card card-flush">
+  <div class="card-head" style="padding-top:4px"><div><h2>Health checks</h2><p>Limits are set in the tool's .env file (MONITOR_ALERT_…)</p></div></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Check</th><th>Status</th><th class="num">Value</th><th>Details</th></tr></thead>
+      <tbody>
+      {% for c in checks %}
+        <tr><td class="cell-main">{{ c.name }}</td><td><span class="badge {{ c.status }}">{{ c.label }}</span></td><td class="num">{{ c.value }}</td><td class="small muted">{{ c.detail }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# ---------------------------------------------------------------- server #}
+{% if server %}
+<div class="kpis">
+  <div class="kpi">
+    <div class="kpi-label">CPU</div>
+    <div class="kpi-value">{{ server.cpu_percent|floatformat:0 }}%</div>
+    <div class="kpi-foot">{{ server.cpu_count }} cores{% if server.cpu_mhz %} · {{ server.cpu_mhz|intcomma }} MHz{% if server.cpu_max_mhz and server.cpu_max_mhz != server.cpu_mhz %} (max {{ server.cpu_max_mhz|intcomma }}){% endif %}{% endif %}{% if server.load_1 is not None %} · load {{ server.load_1 }}{% endif %}</div>
+    <div class="bar" style="margin-top:8px"><span style="width: {{ server.cpu_percent|bar_width }}%"></span></div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Memory</div>
+    {% with pct=server.memory_used|percent_of:server.memory_total %}
+    <div class="kpi-value">{{ pct|floatformat:0 }}%</div>
+    <div class="kpi-foot">{{ server.memory_used|size }} of {{ server.memory_total|size }}</div>
+    <div class="bar" style="margin-top:8px"><span style="width: {{ pct|bar_width }}%"></span></div>
+    {% endwith %}
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Disk</div>
+    {% with pct=server.disk_used|percent_of:server.disk_total %}
+    <div class="kpi-value">{{ pct|floatformat:0 }}%</div>
+    <div class="kpi-foot">{{ server.disk_free|size }} free of {{ server.disk_total|size }}</div>
+    <div class="bar" style="margin-top:8px"><span style="width: {{ pct|bar_width }}%"></span></div>
+    {% endwith %}
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Up for</div>
+    <div class="kpi-value">{{ server.uptime_seconds|duration }}</div>
+    <div class="kpi-foot">{{ server.processes|intcomma }} processes running</div>
+  </div>
+</div>
+{% endif %}
+
+{# ------------------------------------------------- database and services #}
+<div class="kpis">
+  <div class="kpi">
+    <div class="kpi-label">Database size</div>
+    <div class="kpi-value">{{ now.db_size|size }}</div>
+    <div class="kpi-foot">{% if growth.per_day is not None %}{% if growth.per_day >= 0 %}+{% endif %}{{ growth.per_day|size }} a day{% else %}growth shows after 2 days{% endif %}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">In 30 / 90 days</div>
+    <div class="kpi-value" style="font-size:20px">{{ growth.in_30_days|size }}</div>
+    <div class="kpi-foot">{{ growth.in_90_days|size }} in 90 days{% if growth.days_until_full %} · disk full in ~{{ growth.days_until_full|intcomma }} days{% endif %}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Redis</div>
+    <div class="kpi-value" style="font-size:20px">{% if now.redis %}{{ now.redis.memory|size }}{% else %}—{% endif %}</div>
+    <div class="kpi-foot">{% if now.redis %}{{ now.redis.ms }} ms · {{ now.redis.queue_length }} task{{ now.redis.queue_length|pluralize }} waiting{% else %}not reachable or not used here{% endif %}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Report files</div>
+    <div class="kpi-value" style="font-size:20px">{{ now.media.bytes|size }}</div>
+    <div class="kpi-foot">{{ now.media.files|default:0 }} file{{ now.media.files|pluralize }}</div>
+  </div>
+</div>
+
+{# ---------------------------------------------------------------- history #}
+<div class="card">
+  <div class="card-head">
+    <div><h2>Server load over time</h2><p>{{ samples_count }} sample{{ samples_count|pluralize }}{% if latest_sample %} · last {{ latest_sample.taken_at|naturaltime }}{% endif %}</p></div>
+    <div class="segmented" role="group" aria-label="Range">
+      {% for key, label in ranges %}<a href="?range={{ key }}" class="{% if key == range_key %}active{% endif %}">{{ label }}</a>{% endfor %}
+    </div>
+  </div>
+  <div class="card-body">
+    {% if samples_count %}
+      <div class="chart-box"><canvas data-chart="history-chart" aria-label="CPU, memory and disk over time"></canvas></div>
+    {% else %}
+      <p class="empty">No samples yet. They are saved every few minutes by the worker, or click “Measure now”.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-head"><div><h2>Database growth</h2><p>Size at the end of each day{% if growth.rows_per_day is not None %} · about {{ growth.rows_per_day|floatformat:0|intcomma }} new rows a day{% endif %}</p></div></div>
+    <div class="card-body">
+      {% if growth.labels|length > 1 %}
+        <div class="chart-box"><canvas data-chart="db-chart" aria-label="Database size per day"></canvas></div>
+      {% else %}
+        <p class="empty">The chart starts after the second daily snapshot (one is taken every night).</p>
+      {% endif %}
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-head"><div><h2>Response times</h2><p>Database and wellness API, in milliseconds</p></div></div>
+    <div class="card-body">
+      {% if samples_count %}<div class="chart-box"><canvas data-chart="response-chart" aria-label="Response times"></canvas></div>{% else %}<p class="empty">No samples yet.</p>{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="stack"></div>
+
+{# ---------------------------------------------------------------- tables #}
+<div class="grid-2">
+  <div class="card">
+    <div class="card-head"><div><h2>Largest tables</h2><p>Rows in the M&amp;E tool's own tables</p></div></div>
+    <div class="card-body"><div class="chart-box"><canvas data-chart="rows-chart" aria-label="Rows per table"></canvas></div></div>
+  </div>
+  <div class="card card-flush">
+    <div class="card-head" style="padding-top:4px"><div><h2>All tables</h2><p>Rows, space on disk{% if connection_note %} {{ connection_note }}{% endif %} and rows added in 7 days</p></div></div>
+    <div class="table-wrap" style="max-height: 420px; overflow-y: auto">
+      <table>
+        <thead><tr><th>Table</th><th class="num">Rows</th><th class="num">Size</th><th class="num">+7 days</th></tr></thead>
+        <tbody>
+        {% for t in tables %}
+          <tr>
+            <td>{{ t.label }}<span class="sub">{{ t.table }}</span></td>
+            <td class="num">{{ t.rows|intcomma }}</td>
+            <td class="num">{{ t.bytes|size }}</td>
+            <td class="num">{% if t.added_7_days is None %}—{% else %}{{ t.added_7_days|intcomma }}{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{{ history_chart|json_script:"history-chart" }}
+{{ response_chart|json_script:"response-chart" }}
+{{ db_chart|json_script:"db-chart" }}
+{{ rows_chart|json_script:"rows-chart" }}
+{% endblock %}

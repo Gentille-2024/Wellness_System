@@ -1,0 +1,17 @@
+{% for r in reports %}
+  <tr>
+    <td><span class="badge info report-kind">{{ r.get_period_type_display }}</span></td>
+    <td>{{ r.title }}{% if r.is_automatic %}<span class="sub">Automatic</span>{% endif %}</td>
+    <td>{{ r.get_format_display }}</td>
+    <td class="nowrap">{{ r.created_at|date:"d M Y H:i" }}</td>
+    {% if access.is_admin %}<td>{% if r.is_automatic %}Schedule{% else %}{{ r.requested_by.username|default:"—" }}{% endif %}</td>{% endif %}
+    <td><span class="badge {{ r.status }}" {% if r.error %}title="{{ r.error }}"{% endif %}>{{ r.get_status_display }}</span></td>
+    <td class="num">{% if r.status == "done" %}<a class="btn btn-sm" href="{% url 'reports:download' r.id %}">Download</a>{% endif %}</td>
+  </tr>
+{% empty %}
+  <tr><td colspan="7" class="empty">No reports yet.</td></tr>
+{% endfor %}
+{% if waiting %}
+  {# Refresh this table every 3 seconds until every report is ready #}
+  <tr hidden hx-get="{% url 'reports:rows' %}{% if request.GET.type %}?type={{ request.GET.type }}{% endif %}" hx-trigger="load delay:3s" hx-target="#report-rows" hx-swap="innerHTML"><td></td></tr>
+{% endif %}

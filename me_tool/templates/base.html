@@ -1,0 +1,78 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}M&amp;E{% endblock %} · EUCL Wellness M&amp;E</title>
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  <script src="{% static 'vendor/chart-4.5.1.umd.min.js' %}" defer></script>
+  <script src="{% static 'vendor/htmx-2.0.11.min.js' %}" defer></script>
+  <script src="{% static 'js/charts.js' %}" defer></script>
+</head>
+<body>
+{% with url=request.resolver_match.view_name %}
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand-block">
+      <picture>
+        <source srcset="{% static 'img/reg-logo-light.png' %}" media="(prefers-color-scheme: dark)">
+        <img src="{% static 'img/reg-logo.png' %}" alt="Rwanda Energy Group (REG)" class="reg-logo" width="156" height="60">
+      </picture>
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">M&amp;E</span>
+        <span>
+          <span class="brand-name">Wellness</span><br>
+          <span class="brand-sub">Monitoring &amp; Evaluation</span>
+        </span>
+      </div>
+    </div>
+    <button type="button" class="btn btn-sm menu-toggle" aria-label="Menu">Menu</button>
+
+    <nav class="nav" aria-label="Main">
+      <div class="nav-section">Dashboards</div>
+      {% if access.sees_all %}
+        <a href="{% url 'dashboards:overview' %}" class="{% if url == 'dashboards:overview' %}active{% endif %}">Overview</a>
+        <a href="{% url 'dashboards:companies' %}" class="{% if url == 'dashboards:companies' or url == 'dashboards:company' %}active{% endif %}">Companies</a>
+      {% elif access.own_company_id %}
+        <a href="{% url 'dashboards:company' access.own_company_id %}" class="{% if url == 'dashboards:company' %}active{% endif %}">{{ access.company_name|default:"My company" }}</a>
+      {% endif %}
+      <a href="{% url 'dashboards:services' %}" class="{% if url == 'dashboards:services' %}active{% endif %}">Service performance</a>
+      <a href="{% url 'dashboards:indicators' %}" class="{% if url == 'dashboards:indicators' %}active{% endif %}">Indicators</a>
+
+      <div class="nav-section">Reports</div>
+      <a href="{% url 'reports:list' %}" class="{% if url|slice:':8' == 'reports:' %}active{% endif %}">Daily, weekly &amp; monthly</a>
+
+      {% if access.can_manage_targets or access.can_run_sync %}
+        <div class="nav-section">Settings</div>
+        {% if access.can_manage_targets %}
+          <a href="{% url 'indicators:targets' %}" class="{% if url == 'indicators:targets' %}active{% endif %}">Targets</a>
+        {% endif %}
+        {% if access.can_run_sync %}
+          <a href="{% url 'warehouse:sync' %}" class="{% if url|slice:':10' == 'warehouse:' %}active{% endif %}">Data sync</a>
+        {% endif %}
+        {% if access.is_admin %}
+          <a href="{% url 'monitoring:system' %}" class="{% if url|slice:':11' == 'monitoring:' %}active{% endif %}">System resources</a>
+        {% endif %}
+      {% endif %}
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="who">{{ access.full_name|default:user.username }}</div>
+      <div class="muted">{{ access.role_names|join:", "|default:"" }}</div>
+      <form method="post" action="{% url 'accounts:logout' %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-sm">Sign out</button>
+      </form>
+    </div>
+  </aside>
+
+  <main class="main">
+    {% for message in messages %}
+      <div class="alert alert-{% if message.tags == 'error' %}error{% else %}{{ message.tags|default:'info' }}{% endif %}">{{ message }}</div>
+    {% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% endwith %}
+</body>
+</html>

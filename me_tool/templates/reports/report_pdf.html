@@ -1,0 +1,142 @@
+{% load me_format humanize %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ title }} — {{ subtitle }}</title>
+<style>
+  @page {
+    size: A4;
+    margin: 18mm 15mm 18mm 15mm;
+    @bottom-left { content: "EUCL Wellness M&E · {{ subtitle }}"; font-size: 8pt; color: #6b7a73; }
+    @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 8pt; color: #6b7a73; }
+  }
+  * { box-sizing: border-box; }
+  body { font-family: "DejaVu Sans", "Segoe UI", Arial, sans-serif; font-size: 9pt; color: #15201b; line-height: 1.4; }
+  .banner { background: #1f7a55; color: #fff; padding: 12px 16px; border-radius: 6px; }
+  .banner h1 { margin: 0; font-size: 16pt; }
+  .banner p { margin: 2px 0 0; font-size: 10pt; opacity: 0.9; }
+  .meta { color: #6b7a73; font-size: 8pt; margin: 6px 0 14px; }
+  h2 { font-size: 11.5pt; margin: 18px 0 6px; color: #17603f; border-bottom: 1px solid #cfd8d3; padding-bottom: 3px; }
+  .kpis { display: flex; gap: 8px; margin-top: 4px; }
+  .kpi { flex: 1; border: 1px solid #cfd8d3; border-radius: 6px; padding: 8px 10px; }
+  .kpi .label { color: #6b7a73; font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.03em; }
+  .kpi .value { font-size: 13pt; font-weight: bold; margin-top: 2px; }
+  .kpi .foot { color: #6b7a73; font-size: 7.5pt; }
+  table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  th { background: #1f7a55; color: #fff; font-size: 7.5pt; text-align: left; padding: 5px 6px; text-transform: uppercase; letter-spacing: 0.02em; }
+  td { padding: 4px 6px; border-bottom: 1px solid #e3e8e5; vertical-align: middle; }
+  tr:nth-child(even) td { background: #f8faf9; }
+  tfoot td { font-weight: bold; background: #e3efe9 !important; border-top: 1px solid #9db8aa; }
+  .num { text-align: right; white-space: nowrap; }
+  .bar { height: 7px; background: #eef2f0; border-radius: 4px; width: 100%; min-width: 50px; }
+  .bar span { display: block; height: 7px; border-radius: 4px; background: #1f7a55; }
+  .bar.at_risk span { background: #d08c22; }
+  .bar.off_track span { background: #c4504a; }
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 7.5pt; font-weight: bold; background: #eef2f0; color: #6b7a73; }
+  .badge.on_track { background: #e3f4ea; color: #1f7a55; }
+  .badge.at_risk { background: #fdf1dc; color: #9a5b07; }
+  .badge.off_track { background: #fde8e7; color: #b42318; }
+  .change.up { color: #1f7a55; } .change.down { color: #b42318; } .change.flat, .change.muted { color: #6b7a73; }
+  .avoid-break { break-inside: avoid; }
+  .muted { color: #6b7a73; }
+  .two { display: flex; gap: 14px; } .two > div { flex: 1; }
+</style>
+</head>
+<body>
+  <div class="banner">
+    <h1>{{ title }}</h1>
+    <p>{{ subtitle }}</p>
+  </div>
+  <p class="meta">EUCL Wellness Management System · generated {{ generated_at|date:"d M Y H:i" }} · amounts in Rwandan francs (RWF)</p>
+
+  <div class="kpis">
+    {% if all_companies %}
+    <div class="kpi"><div class="label">Participation</div><div class="value">{{ kpis.participation|pct }}</div><div class="foot">{{ kpis.participants }} of {{ kpis.active_employees }} employees</div></div>
+    {% else %}
+    <div class="kpi"><div class="label">Employees who came</div><div class="value">{{ kpis.participants|intcomma }}</div><div class="foot">{{ kpis.participants_change|change }} vs previous {{ unit }}</div></div>
+    {% endif %}
+    <div class="kpi"><div class="label">Services used</div><div class="value">{{ kpis.visits|intcomma }}</div><div class="foot">{{ kpis.visits_change|change }} vs previous {{ unit }}</div></div>
+    <div class="kpi"><div class="label">Amount</div><div class="value">{{ kpis.spend|rwf }}</div><div class="foot">{{ kpis.cost_per_visit|rwf }} per visit</div></div>
+    <div class="kpi"><div class="label">Still owed</div><div class="value">{{ kpis.unpaid|rwf }}</div><div class="foot">for this {{ unit }}</div></div>
+  </div>
+
+  {% if indicators %}
+  <h2>Indicators: targets vs actuals</h2>
+  <div class="muted" style="margin-bottom:4px">{{ indicator_summary.on_track }} on track · {{ indicator_summary.at_risk }} at risk · {{ indicator_summary.off_track }} off track · {{ indicator_summary.no_target }} without a target</div>
+  <table class="avoid-break">
+    <thead><tr><th>Indicator</th><th class="num">Baseline</th><th class="num">Target</th><th class="num">Actual</th><th style="width:22%">Achievement</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for row in indicators %}
+      <tr>
+        <td>{{ row.indicator.name }}</td>
+        <td class="num">{{ row.baseline|unit_value:row.indicator.unit }}</td>
+        <td class="num">{{ row.target|unit_value:row.indicator.unit }}</td>
+        <td class="num">{{ row.actual|unit_value:row.indicator.unit }}</td>
+        <td>{% if row.achievement is not None %}<div class="bar {{ row.status }}"><span style="width: {{ row.achievement|bar_width }}%"></span></div><span class="muted">{{ row.achievement|pct:0 }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td><span class="badge {{ row.status }}">{{ row.status_label }}</span></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <h2>{{ trend_title }}</h2>
+  {% max_of trend "visits" as max_visits %}
+  <table class="avoid-break">
+    <thead><tr><th>{{ unit|capfirst }}</th><th class="num">Services used</th><th style="width:35%"></th><th class="num">Employees</th><th class="num">Amount</th></tr></thead>
+    <tbody>
+    {% for t in trend %}
+      <tr><td>{{ t.label }}</td><td class="num">{{ t.visits|intcomma }}</td><td><div class="bar"><span style="width: {{ t.visits|bar_width:max_visits }}%"></span></div></td><td class="num">{{ t.participants|intcomma }}</td><td class="num">{{ t.spend|rwf }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  <h2>Service performance</h2>
+  <table>
+    <thead><tr><th>Service</th>{% if all_companies %}<th>Company</th>{% endif %}<th class="num">EUCL pays</th><th class="num">Visits</th><th class="num">Change</th><th class="num">Employees</th><th class="num">Amount</th><th class="num">Share</th></tr></thead>
+    <tbody>
+    {% for s in services %}
+      <tr><td>{{ s.name }}</td>{% if all_companies %}<td>{{ s.company }}</td>{% endif %}<td class="num">{% if s.covered %}{{ s.eucl_price|rwf }}{% else %}not covered{% endif %}</td><td class="num">{{ s.visits|intcomma }}</td><td class="num">{{ s.change|change }}</td><td class="num">{{ s.participants }}</td><td class="num">{{ s.spend|rwf }}</td><td class="num">{{ s.share|pct }}</td></tr>
+    {% empty %}
+      <tr><td colspan="8" class="muted">No services were used in this {{ unit }}.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% if all_companies %}
+  <h2>Companies</h2>
+  <table>
+    <thead><tr><th>Company</th><th class="num">Visits</th><th class="num">Employees</th><th class="num">Amount</th><th class="num">Still owed</th><th style="width:22%">Share of spending</th></tr></thead>
+    <tbody>
+    {% for c in companies %}
+      <tr><td>{{ c.company__name }}</td><td class="num">{{ c.visits|intcomma }}</td><td class="num">{{ c.participants }}</td><td class="num">{{ c.spend|rwf }}</td><td class="num">{{ c.unpaid|rwf }}</td><td><div class="bar"><span style="width: {{ c.share|bar_width }}%"></span></div><span class="muted">{{ c.share|pct }}</span></td></tr>
+    {% empty %}
+      <tr><td colspan="6" class="muted">No visits in this {{ unit }}.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <h2>{% if all_companies %}Participation by department{% else %}Visitors by department{% endif %}</h2>
+  <table class="avoid-break">
+    <thead><tr><th>Department</th>{% if all_companies %}<th class="num">Active employees</th>{% endif %}<th class="num">Employees who came</th>{% if all_companies %}<th class="num">Participation</th>{% endif %}<th class="num">Visits</th><th class="num">Amount</th></tr></thead>
+    <tbody>
+    {% for d in departments %}{% if all_companies or d.visits %}
+      <tr><td>{{ d.department }}</td>{% if all_companies %}<td class="num">{{ d.employees }}</td>{% endif %}<td class="num">{{ d.participants }}</td>{% if all_companies %}<td class="num">{{ d.participation|pct }}</td>{% endif %}<td class="num">{{ d.visits }}</td><td class="num">{{ d.spend|rwf }}</td></tr>
+    {% endif %}{% endfor %}
+    </tbody>
+  </table>
+
+  {% if include_names and employees %}
+  <h2>Most active employees</h2>
+  <table>
+    <thead><tr><th>Employee</th><th>ID</th><th>Department</th><th class="num">Visits</th><th class="num">Days</th><th class="num">Amount</th></tr></thead>
+    <tbody>
+    {% for e in employees %}
+      <tr><td>{{ e.employee__first_name }} {{ e.employee__last_name }}</td><td>{{ e.employee__code }}</td><td>{{ e.employee__department }}</td><td class="num">{{ e.visits }}</td><td class="num">{{ e.days }}</td><td class="num">{{ e.spend|rwf }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</body>
+</html>

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% load me_format humanize %}
+{% block title %}Service performance{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Service performance</h1>
+    <p>How much each service was used in {{ month.label }}, compared with the previous {{ month.unit }}.</p>
+  </div>
+  <div class="page-actions">
+    {% if companies %}
+      <form method="get" class="form-row">
+        <input type="hidden" name="period" value="{{ period.kind }}"><input type="hidden" name="date" value="{{ period.url_value }}">
+        <label class="sr-only" for="company-filter">Company</label>
+        <select id="company-filter" name="company" onchange="this.form.submit()">
+          <option value="">All companies</option>
+          {% for c in companies %}<option value="{{ c.id }}" {% if c.id == company_id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+        </select>
+      </form>
+    {% endif %}
+    {% include "partials/month_nav.html" %}
+  </div>
+</div>
+
+<div class="kpis">
+  <div class="kpi"><div class="kpi-label">Services used</div><div class="kpi-value">{{ totals.visits|intcomma }}</div></div>
+  <div class="kpi"><div class="kpi-label">Amount</div><div class="kpi-value">{{ totals.spend|rwf }}</div></div>
+  <div class="kpi"><div class="kpi-label">Services with visits</div><div class="kpi-value">{{ totals.services }}</div></div>
+</div>
+
+{% if rows %}
+<div class="card">
+  <div class="card-head"><div><h2>Top 10 services</h2><p>Visits this {{ month.unit }} and the previous {{ month.unit }}</p></div></div>
+  <div class="card-body"><div class="chart-box tall"><canvas data-chart="services-chart"></canvas></div></div>
+</div>
+{% endif %}
+
+<div class="card card-flush">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Service</th>{% if not company_id and access.sees_all %}<th>Company</th>{% endif %}<th>EUCL covers</th>
+          <th class="num">Visits</th><th class="num">Previous {{ month.unit }}</th><th class="num">Change</th><th class="num">Employees</th><th class="num">Amount</th><th>Share</th></tr>
+      </thead>
+      <tbody>
+      {% for s in rows %}
+        <tr>
+          <td>{{ s.name }}{% if not s.offered %}<span class="sub">Switched off</span>{% endif %}</td>
+          {% if not company_id and access.sees_all %}<td><a href="{% url 'dashboards:company' s.company_id %}?{{ period_query }}">{{ s.company }}</a></td>{% endif %}
+          <td>{% if s.covered %}<span class="badge yes">{{ s.eucl_price|rwf }}</span>{% else %}<span class="badge no">Not covered</span>{% endif %}</td>
+          <td class="num">{{ s.visits|intcomma }}</td>
+          <td class="num">{{ s.previous_visits|intcomma }}</td>
+          <td class="num">{{ s.change|change }}</td>
+          <td class="num">{{ s.participants|intcomma }}</td>
+          <td class="num">{{ s.spend|rwf }}</td>
+          <td><div class="bar" title="{{ s.share|pct }}"><span style="width: {{ s.share|bar_width }}%"></span></div></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="9" class="empty">No services were used in {{ month.label }} or the {{ month.unit }} before.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{ chart|json_script:"services-chart" }}
+{% endblock %}

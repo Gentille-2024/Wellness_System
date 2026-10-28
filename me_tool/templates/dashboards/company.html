@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% load me_format humanize %}
+{% block title %}{{ company.name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    {% if access.sees_all %}<a href="{% url 'dashboards:companies' %}?{{ period_query }}" class="small">‹ All companies</a>{% endif %}
+    <h1>{{ company.name }}</h1>
+    <p>
+      {% if company.deleted_at %}<span class="badge">Deleted</span>{% elif not company.is_active %}<span class="badge at_risk">Deactivated</span>{% endif %}
+      EUCL employees' visits and what EUCL pays · {{ month.label }}
+    </p>
+  </div>
+  <div class="page-actions">
+    {% include "partials/month_nav.html" %}
+    <form method="post" action="{% url 'reports:create' %}" class="form-row">
+      {% csrf_token %}
+      <input type="hidden" name="period" value="{{ period.kind }}"><input type="hidden" name="date" value="{{ period.start|date:'Y-m-d' }}">
+      <input type="hidden" name="company" value="{{ company.id }}">
+      <button class="btn btn-sm" name="format" value="pdf">{{ period.kind|capfirst }} report (PDF)</button>
+      <button class="btn btn-sm" name="format" value="xlsx">{{ period.kind|capfirst }} report (Excel)</button>
+    </form>
+  </div>
+</div>
+
+<div class="kpis">
+  <div class="kpi">
+    <div class="kpi-label">Services used</div>
+    <div class="kpi-value">{{ kpis.visits|intcomma }}</div>
+    <div class="kpi-foot">{{ kpis.visits_change|change }} vs previous {{ month.unit }}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">EUCL employees who came</div>
+    <div class="kpi-value">{{ kpis.participants|intcomma }}</div>
+    <div class="kpi-foot">{{ kpis.participants_change|change }} vs previous {{ month.unit }}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Amount</div>
+    <div class="kpi-value" title="{{ kpis.spend|rwf }}">{{ kpis.spend|rwf }}</div>
+    <div class="kpi-foot">{{ kpis.spend_change|change }} · {{ kpis.cost_per_visit|rwf }} per visit</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">EUCL still owes</div>
+    <div class="kpi-value" title="{{ kpis.owed_all|rwf }}">{{ kpis.owed_all|rwf }}</div>
+    <div class="kpi-foot">{{ kpis.unpaid|rwf }} for {{ month.short_label }}</div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-head"><div><h2>Last {{ month.trend_count }} {{ month.unit }}s</h2><p>Services used and the amount</p></div></div>
+    <div class="card-body"><div class="chart-box"><canvas data-chart="trend-chart"></canvas></div></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><div><h2>Top services</h2><p>Visits this {{ month.unit }} and the previous {{ month.unit }}</p></div></div>
+    <div class="card-body"><div class="chart-box"><canvas data-chart="services-chart"></canvas></div></div>
+  </div>
+</div>
+
+<div class="stack"></div>
+
+<div class="card card-flush">
+  <div class="card-head" style="padding-top:4px"><div><h2>Service performance</h2><p>{{ month.label }}</p></div></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Service</th><th>EUCL covers</th><th class="num">Visits</th><th class="num">Change</th><th class="num">Employees</th><th class="num">Amount</th><th>Share</th></tr></thead>
+      <tbody>
+      {% for s in services %}
+        <tr>
+          <td>{{ s.name }}{% if not s.offered %}<span class="sub">Switched off</span>{% endif %}</td>
+          <td>{% if s.covered %}<span class="badge yes">{{ s.eucl_price|rwf }}</span>{% else %}<span class="badge no">Not covered</span>{% endif %}</td>
+          <td class="num">{{ s.visits|intcomma }}</td>
+          <td class="num">{{ s.change|change }}</td>
+          <td class="num">{{ s.participants|intcomma }}</td>
+          <td class="num">{{ s.spend|rwf }}</td>
+          <td><div class="bar" title="{{ s.share|pct }}"><span style="width: {{ s.share|bar_width }}%"></span></div></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="7" class="empty">No services were used here in {{ month.label }}.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="grid-2">
+  {% if month.is_month %}
+  <div class="card card-flush">
+    <div class="card-head" style="padding-top:4px">
+      <div><h2>Indicators</h2><p>Targets vs actuals for this company</p></div>
+      <a class="btn btn-sm" href="{% url 'dashboards:indicators' %}?{{ period_query }}{% if access.sees_all %}&company={{ company.id }}{% endif %}">Details</a>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Indicator</th><th class="num">Target</th><th class="num">Actual</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for row in indicators %}
+          <tr>
+            <td>{{ row.indicator.name }}</td>
+            <td class="num">{{ row.target|unit_value:row.indicator.unit }}</td>
+            <td class="num">{{ row.actual|unit_value:row.indicator.unit }}</td>
+            <td><span class="badge {{ row.status }}">{{ row.status_label }}</span></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="card">
+    <div class="card-head"><div><h2>Indicators</h2><p>Targets are set per month</p></div></div>
+    <div class="card-body">
+      <p class="muted">Switch to <strong>Month</strong> to compare this company's indicators with their targets.</p>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card card-flush">
+    <div class="card-head" style="padding-top:4px"><div><h2>Visitors by department</h2><p>EUCL departments of the employees who came</p></div></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Department</th><th class="num">Employees who came</th><th class="num">Visits</th><th class="num">Amount</th></tr></thead>
+        <tbody>
+        {% for d in departments %}{% if d.visits %}
+          <tr><td>{{ d.department }}</td><td class="num">{{ d.participants }}</td><td class="num">{{ d.visits }}</td><td class="num">{{ d.spend|rwf }}</td></tr>
+        {% endif %}{% empty %}
+          <tr><td colspan="4" class="empty">No visits in this {{ month.unit }}.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{{ trend_chart|json_script:"trend-chart" }}
+{{ services_chart|json_script:"services-chart" }}
+{% endblock %}

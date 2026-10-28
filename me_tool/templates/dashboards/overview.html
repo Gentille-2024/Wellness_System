@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% load me_format humanize %}
+{% block title %}Overview{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Overview</h1>
+    <p>EUCL employees' use of wellness services across all companies · {{ month.label }}</p>
+  </div>
+  <div class="page-actions">{% include "partials/month_nav.html" %}</div>
+</div>
+
+{% if not sync.last_success_at %}
+  <div class="alert alert-warning">No data has been synced from the wellness system yet.{% if access.can_run_sync %} <a href="{% url 'warehouse:sync' %}">Run the first sync</a>.{% endif %}</div>
+{% elif sync.last_error %}
+  <div class="alert alert-warning">The last sync failed; figures are from {{ sync.last_success_at|naturaltime }}.</div>
+{% endif %}
+
+<div class="kpis">
+  <div class="kpi">
+    <div class="kpi-label">Participation rate</div>
+    <div class="kpi-value">{{ kpis.participation|pct }}</div>
+    <div class="kpi-foot">{{ kpis.participants|intcomma }} of {{ kpis.active_employees|intcomma }} active employees</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Services used</div>
+    <div class="kpi-value">{{ kpis.visits|intcomma }}</div>
+    <div class="kpi-foot">{{ kpis.visits_change|change }} vs previous {{ month.unit }}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Amount spent</div>
+    <div class="kpi-value" title="{{ kpis.spend|rwf }}">{{ kpis.spend|rwf }}</div>
+    <div class="kpi-foot">{{ kpis.spend_change|change }} · {{ kpis.cost_per_visit|rwf }} per visit</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">EUCL still owes</div>
+    <div class="kpi-value" title="{{ kpis.owed_all|rwf }}">{{ kpis.owed_all|rwf }}</div>
+    <div class="kpi-foot">{{ kpis.unpaid|rwf }} for {{ month.short_label }}</div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-head"><div><h2>Last {{ month.trend_count }} {{ month.unit }}s</h2><p>Services used and the amount EUCL pays</p></div></div>
+    <div class="card-body"><div class="chart-box"><canvas data-chart="trend-chart" aria-label="Services used and amount per month"></canvas></div></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><div><h2>Employees taking part</h2><p>Different EUCL employees who used a service each month</p></div></div>
+    <div class="card-body"><div class="chart-box"><canvas data-chart="participants-chart" aria-label="Participants per month"></canvas></div></div>
+  </div>
+</div>
+
+<div class="stack"></div>
+
+<div class="grid-2">
+  <div class="card">
+    <div class="card-head">
+      <div><h2>Companies</h2><p>Where the money went in {{ month.short_label }}</p></div>
+      <a class="btn btn-sm" href="{% url 'dashboards:companies' %}?{{ period_query }}">All companies</a>
+    </div>
+    {% if companies %}
+      <div class="card-body"><div class="chart-box short"><canvas data-chart="company-chart" aria-label="Amount per company"></canvas></div></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Company</th><th class="num">Visits</th><th class="num">Employees</th><th class="num">Amount</th><th class="num">Owed</th></tr></thead>
+          <tbody>
+          {% for c in companies %}
+            <tr>
+              <td><a href="{% url 'dashboards:company' c.company_id %}?{{ period_query }}">{{ c.company__name }}</a></td>
+              <td class="num">{{ c.visits|intcomma }}</td>
+              <td class="num">{{ c.participants|intcomma }}</td>
+              <td class="num">{{ c.spend|rwf }} <span class="sub">{{ c.share|pct }}</span></td>
+              <td class="num">{{ c.unpaid|rwf }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty">No services were used in {{ month.label }}.</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-head"><div><h2>Departments</h2><p>Share of each department's employees who took part</p></div></div>
+    <div class="card-body"><div class="chart-box"><canvas data-chart="department-chart" aria-label="Participation by department"></canvas></div></div>
+  </div>
+</div>
+
+<div class="stack"></div>
+
+<div class="grid-2">
+  {% if month.is_month %}
+  <div class="card">
+    <div class="card-head">
+      <div><h2>Indicators</h2><p>Targets vs actuals for {{ month.short_label }}</p></div>
+      <a class="btn btn-sm" href="{% url 'dashboards:indicators' %}?{{ period_query }}">Details</a>
+    </div>
+    <div class="card-body">
+      <div class="status-strip">
+        <span class="badge on_track">{{ indicator_summary.on_track }} on track</span>
+        <span class="badge at_risk">{{ indicator_summary.at_risk }} at risk</span>
+        <span class="badge off_track">{{ indicator_summary.off_track }} off track</span>
+        <span class="badge">{{ indicator_summary.no_target }} without a target</span>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Indicator</th><th class="num">Target</th><th class="num">Actual</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for row in indicators %}
+          <tr>
+            <td>{{ row.indicator.name }}</td>
+            <td class="num">{{ row.target|unit_value:row.indicator.unit }}</td>
+            <td class="num">{{ row.actual|unit_value:row.indicator.unit }}</td>
+            <td><span class="badge {{ row.status }}">{{ row.status_label }}</span></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="card">
+    <div class="card-head"><div><h2>Indicators</h2><p>Targets are set per month</p></div></div>
+    <div class="card-body">
+      <p class="muted">Switch to <strong>Month</strong> to compare the indicators with their targets.</p>
+      <a class="btn btn-sm" href="{% url 'dashboards:indicators' %}?{{ period_query }}">Indicators for {{ month.start|date:"F Y" }}</a>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if access.can_see_names %}
+  <div class="card">
+    <div class="card-head"><div><h2>Most active employees</h2><p>{{ month.label }}</p></div></div>
+    {% if top_employees %}
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Employee</th><th class="num">Visits</th><th class="num">Days</th><th class="num">Amount</th></tr></thead>
+          <tbody>
+          {% for e in top_employees %}
+            <tr>
+              <td>{{ e.employee__first_name }} {{ e.employee__last_name }}<span class="sub">{{ e.employee__code }} · {{ e.employee__department }}</span></td>
+              <td class="num">{{ e.visits }}</td>
+              <td class="num">{{ e.days }}</td>
+              <td class="num">{{ e.spend|rwf }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="empty">Nobody used a service in this {{ month.unit }}.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+{{ trend_chart|json_script:"trend-chart" }}
+{{ participants_chart|json_script:"participants-chart" }}
+{{ company_chart|json_script:"company-chart" }}
+{{ department_chart|json_script:"department-chart" }}
+{% endblock %}

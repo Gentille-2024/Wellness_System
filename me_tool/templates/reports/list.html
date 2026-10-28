@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Reports{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Reports</h1>
+    <p>Daily, weekly and monthly reports as PDF or Excel: services, companies, departments, and (monthly) indicators against their targets.</p>
+  </div>
+</div>
+
+<form method="post" action="{% url 'reports:create' %}" class="card">
+  {% csrf_token %}
+  <div class="card-head"><div><h2>New report</h2><p>It is prepared in the background and appears below when ready.</p></div></div>
+  <div class="card-body form-row">
+    <label>Report
+      <select name="period">
+        {% for value, label in period_types %}<option value="{{ value }}" {% if value == "day" %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Date <span class="small">(for a week or month: any day in it)</span>
+      <input type="date" name="date" value="{{ default_date|date:'Y-m-d' }}" required>
+    </label>
+    <label>Company
+      <select name="company">
+        {% if access.sees_all %}<option value="">All companies</option>{% endif %}
+        {% for c in companies %}<option value="{{ c.id }}" {% if selected_company == c.id|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="btn btn-primary" name="format" value="pdf">Create PDF</button>
+    <button type="submit" class="btn" name="format" value="xlsx">Create Excel</button>
+  </div>
+  {% if access.sees_all %}
+    <div class="card-body small muted" style="padding-top:0">
+      Made automatically for all companies: a <strong>daily</strong> report every morning (yesterday), a <strong>weekly</strong> report every Monday (last week) and a <strong>monthly</strong> report on the 1st (last month).
+    </div>
+  {% endif %}
+</form>
+
+<div class="card card-flush">
+  <div class="card-head" style="padding-top:4px">
+    <div><h2>{% if access.sees_all %}Reports{% else %}Your reports{% endif %}</h2></div>
+    <div class="segmented" role="group" aria-label="Show">
+      <a href="?" class="{% if not selected_type %}active{% endif %}">All</a>
+      {% for value, label in period_types %}<a href="?type={{ value }}" class="{% if selected_type == value %}active{% endif %}">{{ label }}</a>{% endfor %}
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Type</th><th>Report</th><th>Format</th><th>Made</th>{% if access.is_admin %}<th>By</th>{% endif %}<th>Status</th><th></th></tr></thead>
+      <tbody id="report-rows">{% include "reports/_rows.html" %}</tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

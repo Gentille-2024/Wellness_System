@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Targets{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Targets</h1>
+    <p>What EUCL aims for each month. Leave a box empty to remove that target.</p>
+  </div>
+  <form method="get" class="page-actions">
+    <label>Month <input type="month" name="month" value="{{ month.key }}" onchange="this.form.submit()"></label>
+    <label>For
+      <select name="company" onchange="this.form.submit()">
+        <option value="">EUCL overall</option>
+        {% for c in companies %}<option value="{{ c.id }}" {% if company and c.id == company.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+      </select>
+    </label>
+  </form>
+</div>
+
+<form method="post" class="card card-flush">
+  {% csrf_token %}
+  <input type="hidden" name="month" value="{{ month.key }}">
+  <input type="hidden" name="company" value="{{ company.id|default:'' }}">
+  <div class="card-head" style="padding-top:4px">
+    <div><h2>{{ company.name|default:"EUCL overall" }} · {{ month.label }}</h2>
+      <p>{% if company %}Indicators that only make sense for EUCL as a whole (like participation) are set under “EUCL overall”.{% else %}Set per-company targets by choosing a company above.{% endif %}</p>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Indicator</th><th>Better when</th><th>Target</th><th>Note</th><th>Last set</th></tr></thead>
+      <tbody>
+      {% for row in rows %}
+        <tr>
+          <td>{{ row.indicator.name }}<span class="sub">{{ row.indicator.description }}</span></td>
+          <td class="nowrap">{{ row.indicator.get_direction_display }}</td>
+          <td class="nowrap">
+            <label class="sr-only" for="target-{{ row.indicator.id }}">Target for {{ row.indicator.name }}</label>
+            <input id="target-{{ row.indicator.id }}" class="input-number" name="target_{{ row.indicator.id }}" inputmode="decimal"
+                   value="{{ row.target.value|default_if_none:''|floatformat:'-2' }}" placeholder="—">
+            <span class="muted">{{ row.indicator.get_unit_display }}</span>
+          </td>
+          <td><input name="note_{{ row.indicator.id }}" value="{{ row.target.note|default:'' }}" maxlength="255" aria-label="Note for {{ row.indicator.name }}"></td>
+          <td class="small muted">{% if row.target %}{{ row.target.set_by }}<span class="sub">{{ row.target.updated_at|date:"d M Y" }}</span>{% else %}—{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card-body form-row" style="justify-content: space-between">
+    <label>Also use these targets for
+      <select name="repeat">
+        {% for n in repeat_choices %}<option value="{{ n }}">{% if n == 0 %}this month only{% else %}the next {{ n }} month{{ n|pluralize }}{% endif %}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="btn btn-primary">Save targets</button>
+  </div>
+</form>
+{% endblock %}

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Data sync{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Data sync</h1>
+    <p>The M&amp;E tool copies data from the wellness system at {{ wellness_url }} every few minutes, and checks the last days every night.</p>
+  </div>
+  <form method="post" action="{% url 'warehouse:sync-now' %}" class="page-actions">
+    {% csrf_token %}
+    <button class="btn btn-primary" type="submit">Sync now</button>
+    <button class="btn" type="submit" name="full" value="1" title="Read every visit again">Full sync</button>
+  </form>
+</div>
+
+{% if state.last_error %}<div class="alert alert-error">Last error: {{ state.last_error }}</div>{% endif %}
+
+<div class="kpis">
+  <div class="kpi"><div class="kpi-label">Last successful sync</div>
+    <div class="kpi-value" style="font-size:20px">{% if state.last_success_at %}{{ state.last_success_at|naturaltime }}{% else %}Never{% endif %}</div>
+    <div class="kpi-foot">{{ state.last_success_at|date:"d M Y H:i"|default:"" }}</div></div>
+  {% for label, value in counts.items %}
+    <div class="kpi"><div class="kpi-label">{{ label }}</div><div class="kpi-value">{{ value|intcomma }}</div></div>
+  {% endfor %}
+</div>
+
+<div class="card card-flush">
+  <div class="card-head" style="padding-top:4px"><div><h2>Recent runs</h2></div></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Started</th><th>Kind</th><th>Status</th><th>Took</th><th>Result</th></tr></thead>
+      <tbody>
+      {% for run in runs %}
+        <tr>
+          <td class="nowrap">{{ run.started_at|date:"d M Y H:i:s" }}</td>
+          <td>{{ run.get_kind_display }}</td>
+          <td><span class="badge {{ run.status }}">{{ run.get_status_display }}</span></td>
+          <td class="nowrap">{% if run.duration %}{{ run.duration.total_seconds|floatformat:1 }} s{% else %}—{% endif %}</td>
+          <td class="small">{% if run.message %}{{ run.message }}{% else %}{% for key, value in run.counts.items %}{{ key }}: {{ value }}{% if not forloop.last %} · {% endif %}{% endfor %}{% endif %}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5" class="empty">No sync has run yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -3,20 +3,28 @@ from decimal import Decimal
 
 from django.contrib.auth.models import User
 from django.db import IntegrityError, transaction
+from django.http import HttpResponse
 from django.db.models import Count, Exists, OuterRef, Prefetch, Q, Sum
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed, NotFound, PermissionDenied, ValidationError
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
-from .models import Company, Employee, Payment, Permission, Role, Service, Visit
-from .permissions import COMPANY_ROLE_PERMISSIONS, active_roles, deny_if_company_deactivated, get_company, get_permissions, has_perm
+from . import employee_import
+from .models import display_name
+from .models import Company, Employee, Payment, Permission, PriceChange, Role, Service, Visit
+from .permissions import active_roles, company_role_permissions, deny_if_company_deactivated, get_company, get_permissions, has_perm
 from .serializers import (
+    PriceChangeSerializer,
+    record_price_change,
+    FeedbackSerializer,
+    FirstLoginSerializer,
     ChangePasswordSerializer,
     CompanySerializer,
     CustomTokenObtainPairSerializer,
@@ -73,7 +81,7 @@ def visits_for(user):
     The visits this user may see. Each permission adds what it allows:
       view_all_visits                     -> every visit
       view_company_visits / record_visits -> visits at their own company
-      use_services                        -> their own visits
+      Overview / My services pages        -> their own visits
     (COMPANY_VISIT_PERMS lists every permission that shows the company's visits)
     """
     perms = get_permissions(user)
@@ -85,7 +93,7 @@ def visits_for(user):
     company = get_company(user)
     if perms & COMPANY_VISIT_PERMS and company is not None:
         allowed |= Q(company=company)
-    if "use_services" in perms:
+    if perms & {"view_my_overview", "view_my_services"}:
         allowed |= Q(employee__user=user)
     return visits.filter(allowed)
 
@@ -162,7 +170,7 @@ def me_payload(request):
         "username": user.username,
         "first_name": user.first_name,
         "last_name": user.last_name,
-        "full_name": user.get_full_name(),
+        "full_name": display_name(user),
         "email": user.email,
         "is_superuser": user.is_superuser,
         "role_names": role_names(user),
@@ -171,7 +179,10 @@ def me_payload(request):
         # ...and only what their roles give them (decides which company /
         # employee menus to show: a super admin isn't automatically an employee)
         "role_permissions": sorted(
-            set(active_roles(profile).values_list("permissions__code", flat=True).exclude(permissions__code=None))
+            set(
+                active_roles(profile).exclude(code=Role.SUPER_ADMIN)
+                .values_list("permissions__code", flat=True).exclude(permissions__code=None)
+            )
         ) if profile else [],
         "company": CompanySerializer(company).data if company else None,
         "employee": EmployeeSerializer(employee).data if employee else None,
@@ -211,19 +222,75 @@ class ChangePasswordView(APIView):
         return Response({"detail": "Your password has been changed."})
 
 
+class FirstLoginThrottle(AnonRateThrottle):
+    """Slows down guessing: a few tries per hour from one address."""
+    rate = "20/hour"
+
+
+class FirstLoginView(APIView):
+    """
+    POST /api/first-login/ {employee_id, contact (email or phone), password, password_confirm}
+    An employee HR added creates their account (their own password).
+    Open to visitors who are not signed in.
+    """
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = [FirstLoginThrottle]
+
+    def post(self, request):
+        serializer = FirstLoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        return Response({"username": user.username, "detail": "Your account is ready. Sign in with your username and new password."})
+
+
 # -------------------------------------------------------- roles & permissions
 
 class PermissionListView(APIView):
-    """GET /api/permissions/ -> every permission a role can be given."""
+    """
+    GET  /api/permissions/ -> every permission a role can be given
+    POST /api/permissions/ {name, description, area} -> the super admin adds one
+    """
 
     # Company bosses get the permissions they may put in their own roles
     read_perms = ("manage_users", "manage_company_staff")
+    write_perms = ("manage_users",)
 
     def get(self, request):
         permissions = Permission.objects.all()
         if not has_perm(request.user, "manage_users"):
-            permissions = permissions.filter(code__in=COMPANY_ROLE_PERMISSIONS)
+            permissions = permissions.filter(code__in=company_role_permissions())
         return Response(PermissionSerializer(permissions, many=True).data)
+
+    def post(self, request):
+        serializer = PermissionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(PermissionSerializer(serializer.save()).data, status=status.HTTP_201_CREATED)
+
+
+class PermissionDetailView(APIView):
+    """PATCH / DELETE /api/permissions/<code>/ -> only permissions the super admin added."""
+
+    read_perms = ("manage_users",)
+    write_perms = ("manage_users",)
+
+    def _get(self, code):
+        permission = Permission.objects.filter(code=code).first()
+        if permission is None:
+            raise NotFound("This permission doesn't exist.")
+        if permission.is_builtin:
+            raise ValidationError({"detail": "Built-in permissions can't be changed or deleted; give or take them through roles."})
+        return permission
+
+    def patch(self, request, code):
+        serializer = PermissionSerializer(self._get(code), data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        return Response(PermissionSerializer(serializer.save()).data)
+
+    def delete(self, request, code):
+        self._get(code).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class RoleViewSet(viewsets.ModelViewSet):
@@ -292,7 +359,7 @@ class StatsView(APIView):
                 raise PermissionDenied("You don't have permission to see this company's dashboard.")
             visits = Visit.objects.filter(company=company)
             per_service = (
-                visits.values("service_id", "service__name", "service__eucl_price")
+                visits.values("service_id", "service__name", "service__price")
                 .annotate(
                     visits=Count("id"),
                     total=Sum("price"),
@@ -322,7 +389,7 @@ class StatsView(APIView):
                 "by_service": [
                     {
                         "service": row["service__name"],
-                        "current_price": row["service__eucl_price"],
+                        "current_price": row["service__price"],
                         "visits": row["visits"],
                         "total": money(row["total"]),
                         "paid": money(row["paid"]),
@@ -362,6 +429,7 @@ class StatsView(APIView):
             "daily": daily_counts(visits),
             "by_company": [
                 {
+                    "company_id": row["company_id"],
                     "company": row["company__name"],
                     "visits": row["visits"],
                     "total": money(row["total"]),
@@ -381,7 +449,12 @@ class CompanyViewSet(viewsets.ModelViewSet):
     """
 
     serializer_class = CompanySerializer
-    read_perms = ("manage_companies", "manage_payments", "view_all_visits", "manage_company_services") + tuple(COMPANY_VISIT_PERMS)
+    # HR reads the list too, to filter the price changes and employees attended by
+    # company; Users & roles reads it to link a login to its company
+    read_perms = (
+        "manage_companies", "manage_payments", "view_all_visits", "manage_company_services", "view_price_changes",
+        "view_all_employees_attended", "manage_users",
+    ) + tuple(COMPANY_VISIT_PERMS)
     write_perms = ("manage_companies",)
 
     filter_backends = [filters.SearchFilter]
@@ -397,7 +470,10 @@ class CompanyViewSet(viewsets.ModelViewSet):
         ).order_by("name")
 
         user = self.request.user
-        if not has_perm(user, "manage_companies", "manage_payments", "view_all_visits"):
+        if not has_perm(
+            user, "manage_companies", "manage_payments", "view_all_visits", "view_price_changes",
+            "view_all_employees_attended", "manage_users",
+        ):
             company = get_company(user)
             return companies.filter(pk=getattr(company, "pk", None), deleted_at__isnull=True)
 
@@ -445,35 +521,32 @@ class CompanyViewSet(viewsets.ModelViewSet):
     def covered_services(self, request, pk=None):
         """
         POST /api/companies/<id>/covered-services/
-             {"services": [{"id": 3, "eucl_price": "3000"}, {"id": 5, "eucl_price": "12000"}]}
-        EUCL chooses which of the company's services its employees may use and
-        the amount it pays per visit. Services not in the list are not covered.
+             {"services": [{"id": 3}, {"id": 5}]}   (or just [3, 5])
+        EUCL chooses which of the company's services its employees may use.
+        EUCL pays the company's own price, so no separate amount is sent.
+        Services not in the list are not covered.
         """
         company = self.get_object()
         chosen = request.data.get("services")
         if not isinstance(chosen, list):
-            raise ValidationError({"services": "Send the services EUCL covers, each with its amount."})
+            raise ValidationError({"services": "Send the services EUCL covers."})
 
-        amounts = {}
+        chosen_ids = set()
         for item in chosen:
             try:
-                service_id = int(item["id"])
-                amount = Decimal(str(item["eucl_price"]))
-            except (KeyError, TypeError, ValueError, ArithmeticError):
-                raise ValidationError({"services": "Each covered service needs an id and the amount EUCL pays."})
-            if amount < 0:
-                raise ValidationError({"services": "Amounts can't be negative."})
-            amounts[service_id] = amount
+                chosen_ids.add(int(item["id"] if isinstance(item, dict) else item))
+            except (KeyError, TypeError, ValueError):
+                raise ValidationError({"services": "Each covered service needs its id."})
 
         company_services = {service.pk: service for service in company.services.all()}
-        if set(amounts) - set(company_services):
+        if chosen_ids - set(company_services):
             raise ValidationError({"services": "Some of these services don't belong to this company."})
 
         with transaction.atomic():
             for service in company_services.values():
-                service.is_approved = service.pk in amounts
-                if service.is_approved:
-                    service.eucl_price = amounts[service.pk]
+                service.is_approved = service.pk in chosen_ids
+                # Kept equal to the company's price (the M&E tool still reads it)
+                service.eucl_price = service.price if service.is_approved else None
                 service.save(update_fields=["is_approved", "eucl_price"])
 
         services = Service.objects.filter(company=company).annotate(visit_count=Count("visits")).order_by("name")
@@ -530,7 +603,11 @@ class ServiceViewSet(viewsets.ModelViewSet):
 
     serializer_class = ServiceSerializer
     open_read = True
-    write_perms = ("manage_companies", "manage_company_services")
+    write_perms = ("manage_companies", "manage_company_services", "edit_service_prices")
+
+    def _prices_only(self):
+        """Staff who may only change prices (e.g. a receptionist), not manage services."""
+        return not has_perm(self.request.user, "manage_companies", "manage_company_services")
     # No DELETE: a service with history is switched off with is_active instead
     http_method_names = ["get", "post", "patch", "head", "options"]
 
@@ -558,14 +635,77 @@ class ServiceViewSet(viewsets.ModelViewSet):
             services = services.filter(is_active=True, is_approved=True)
         return services.order_by("company__name", "name")
 
+    # Every price given or changed is written down with who did it
+    def perform_create(self, serializer):
+        if self._prices_only():
+            raise PermissionDenied("You can change prices, but not add services.")
+        service = serializer.save()
+        record_price_change(service, None, self.request.user)
+
+    def perform_update(self, serializer):
+        if self._prices_only() and set(self.request.data) - {"price"}:
+            raise PermissionDenied("You can only change the price.")
+        old_price = serializer.instance.price
+        service = serializer.save()
+        record_price_change(service, old_price, self.request.user)
+
+
+class PriceChangeListView(APIView):
+    """
+    GET /api/price-changes/?company=&service=&date_from=&date_to=&changed=yes
+    Who gave or changed each service price, and when (admin, HR).
+    changed=yes leaves out the first price of new services.
+    """
+
+    read_perms = ("view_price_changes",)
+
+    def get(self, request):
+        changes = PriceChange.objects.select_related("service", "company")
+        params = request.query_params
+        for field in ("company", "service"):
+            if params.get(field):
+                changes = changes.filter(**{f"{field}_id": params[field]})
+        date_from, date_to = date_param(request, "date_from"), date_param(request, "date_to")
+        if date_from:
+            changes = changes.filter(changed_at__date__gte=date_from)
+        if date_to:
+            changes = changes.filter(changed_at__date__lte=date_to)
+        if params.get("changed") == "yes":
+            changes = changes.filter(old_price__isnull=False)
+        return Response(PriceChangeSerializer(changes[:1000], many=True).data)
+
 
 # ------------------------------------------------------------- EUCL employees
+
+def _rows(errors):
+    """Turns the error rows into text: "row 3" or "rows 3, 5 and 9"."""
+    rows = sorted({e["row"] for e in errors})
+    if len(rows) == 1:
+        return f"row {rows[0]}"
+    return "rows " + ", ".join(str(r) for r in rows[:-1]) + f" and {rows[-1]}"
+
 
 class EmployeeViewSet(viewsets.ModelViewSet):
     serializer_class = EmployeeSerializer
     # Receptionists search employees to record their visits
-    read_perms = ("manage_employees", "record_visits", "take_attendance", "view_all_visits")
-    write_perms = ("manage_employees",)
+    READ_PERMS = ("manage_employees", "record_visits", "take_attendance", "view_all_visits")
+
+    @property
+    def read_perms(self):
+        action = getattr(self, "action", None)
+        if action == "departments":
+            # Only the department names, for the filters of every list that has one
+            return self.READ_PERMS + ("manage_payments", "view_all_employees_attended") + tuple(COMPANY_VISIT_PERMS)
+        if action == "download_template":
+            return ("import_employees",)
+        return self.READ_PERMS
+
+    @property
+    def write_perms(self):
+        # "Upload employees from Excel" works on its own, without "Manage EUCL employees"
+        if getattr(self, "action", None) == "import_file":
+            return ("manage_employees", "import_employees")
+        return ("manage_employees",)
     # No DELETE: removing an employee would erase their history.
     http_method_names = ["get", "post", "patch", "head", "options"]
 
@@ -610,6 +750,48 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         employee = serializer.save()
         return Response(self.get_serializer(employee).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=["get"], url_path="template")
+    def download_template(self, request):
+        """GET /api/employees/template/ -> the empty Excel template for HR."""
+        if not has_perm(request.user, "import_employees"):
+            raise PermissionDenied("You don't have permission to upload employees.")
+        response = HttpResponse(
+            employee_import.template_bytes(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = 'attachment; filename="eucl-employees-template.xlsx"'
+        return response
+
+    @action(detail=False, methods=["post"], url_path="import")
+    def import_file(self, request):
+        """
+        POST /api/employees/import/  (multipart, field "file": .xlsx or .csv)
+        -> {"created": n, "updated": n}, or 400 {"detail", "errors": [{"row", "message"}]}
+        Nothing is saved when any row has a problem.
+        """
+        if not has_perm(request.user, "import_employees"):
+            raise PermissionDenied("You don't have permission to upload employees.")
+        upload = request.FILES.get("file")
+        if upload is None:
+            raise ValidationError({"detail": "Choose the Excel file to upload."})
+        try:
+            records, errors = employee_import.parse(upload)
+        except employee_import.ImportError_ as exc:
+            raise ValidationError({"detail": str(exc)})
+        if errors:
+            return Response(
+                {
+                    "detail": (
+                        f"Nothing was saved. Fix {'this problem' if len(errors) == 1 else f'these {len(errors)} problems'} "
+                        f"in the file ({_rows(errors)}) and upload it again."
+                    ),
+                    "errors": errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        created, updated = employee_import.apply(records)
+        return Response({"created": created, "updated": updated})
+
     @action(detail=True, methods=["post"], url_path="set-active")
     def set_active(self, request, pk=None):
         """POST /api/employees/<id>/set-active/ {"is_active": true|false}"""
@@ -639,9 +821,38 @@ class VisitViewSet(viewsets.ModelViewSet):
     """
 
     serializer_class = VisitSerializer
-    read_perms = ("view_all_visits", "use_services", "manage_payments") + tuple(COMPANY_VISIT_PERMS)
-    write_perms = ("record_visits", "take_attendance")
+    read_perms = (
+        "view_all_visits", "view_my_overview", "view_my_services", "manage_payments", "view_all_employees_attended",
+    ) + tuple(COMPANY_VISIT_PERMS)
     http_method_names = ["get", "post", "delete", "head", "options"]
+
+    @property
+    def write_perms(self):
+        # Employees write only feedback on their own services
+        if getattr(self, "action", None) == "feedback":
+            return ("view_my_services", "view_my_overview")
+        return ("record_visits", "take_attendance")
+
+    @action(detail=True, methods=["post", "delete"])
+    def feedback(self, request, pk=None):
+        """
+        POST   /api/visits/<id>/feedback/ {"kind": "comment|complaint", "message": "…"}
+        DELETE /api/visits/<id>/feedback/  -> take the feedback back
+        Only the employee who used the service.
+        """
+        visit = self.get_object()
+        if visit.employee.user_id != request.user.id:
+            raise PermissionDenied("You can only give feedback on your own services.")
+        if request.method == "DELETE":
+            visit.feedback_kind, visit.feedback_message, visit.feedback_at = "", "", None
+        else:
+            serializer = FeedbackSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            visit.feedback_kind = serializer.validated_data["kind"]
+            visit.feedback_message = serializer.validated_data["message"]
+            visit.feedback_at = timezone.now()
+        visit.save(update_fields=["feedback_kind", "feedback_message", "feedback_at", "updated_at"])
+        return Response(VisitSerializer(visit).data)
 
     def get_queryset(self):
         visits = visits_for(self.request.user).select_related(
@@ -667,8 +878,8 @@ class VisitViewSet(viewsets.ModelViewSet):
                             employee=employee,
                             service=service,
                             company=service.company,
-                            # EUCL pays the amount it agreed for this service
-                            price=service.eucl_price,
+                            # EUCL pays the company's own price for this service
+                            price=service.price,
                             visit_date=today,
                             recorded_by=request.user,
                         ))
@@ -690,21 +901,33 @@ class VisitViewSet(viewsets.ModelViewSet):
         and the amount; plus the totals for all employees together.
         Uses the same permissions and filters as the visit list, so a company's
         staff only ever see their own company's employees.
+        view_all_employees_attended (EUCL HR): every company (?company= narrows
+        it to one), without opening the full list of usage records.
         """
-        if not has_perm(request.user, "view_employees_attended", "view_company_visits", "view_all_visits", "manage_payments"):
+        if not has_perm(
+            request.user, "view_employees_attended", "view_company_visits", "view_all_visits", "manage_payments",
+            "view_all_employees_attended",
+        ):
             raise PermissionDenied("You don't have permission to see the employees attended.")
+        if has_perm(request.user, "view_all_employees_attended"):
+            visits = filter_visits(request, Visit.objects.all())
+        else:
+            visits = self.get_queryset()
         # .order_by() clears the list ordering so grouping stays per employee
-        visits = self.get_queryset().order_by()
+        visits = visits.order_by()
 
         services_per_employee = {}
         for row in (
-            visits.values("employee_id", "service__name")
+            visits.values("employee_id", "service__name", "company__name")
             .annotate(count=Count("id"), amount=Sum("price"))
-            .order_by("service__name")
+            .order_by("service__name", "company__name")
         ):
-            services_per_employee.setdefault(row["employee_id"], []).append(
-                {"service": row["service__name"], "count": row["count"], "amount": money(row["amount"])}
-            )
+            services_per_employee.setdefault(row["employee_id"], []).append({
+                "service": row["service__name"],
+                "company": row["company__name"],
+                "count": row["count"],
+                "amount": money(row["amount"]),
+            })
 
         employees = (
             visits.values(
@@ -715,14 +938,14 @@ class VisitViewSet(viewsets.ModelViewSet):
                 "employee__department",
             )
             .annotate(visits=Count("id"), days=Count("visit_date", distinct=True), total=Sum("price"))
-            .order_by("-total", "employee__user__first_name")
+            .order_by("-total", "employee__user__last_name", "employee__user__first_name")
         )
 
         rows = [
             {
                 "employee": row["employee_id"],
                 "employee_code": row["employee__employee_id"],
-                "employee_name": f'{row["employee__user__first_name"]} {row["employee__user__last_name"]}'.strip(),
+                "employee_name": f'{row["employee__user__last_name"]} {row["employee__user__first_name"]}'.strip(),
                 "department": row["employee__department"],
                 "visits": row["visits"],
                 "days": row["days"],
@@ -743,15 +966,36 @@ class VisitViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, visit):
         """Undo a mistake: super admin any unpaid visit; reception today's unpaid visits at their company."""
         if visit.payment_id is not None:
-            raise ValidationError("This visit is already paid and can't be removed.")
+            raise ValidationError("This service is already paid and can't be removed.")
         user = self.request.user
         if not user.is_superuser:
             if visit.company != get_company(user) or visit.visit_date != timezone.localdate():
-                raise PermissionDenied("You can only undo today's visits at your own company.")
+                raise PermissionDenied("You can only undo today's services at your own company.")
         visit.delete()
 
 
 # ------------------------------------------------------------------ payments
+
+class FeedbackListView(APIView):
+    """
+    GET /api/feedback/?kind=&date_from=&date_to=&company=&search=
+    The feedback employees sent about the services they used.
+      view_feedback          -> every company (HR, super admin)
+      view_company_feedback  -> the user's own company (boss, receptionist)
+    """
+
+    read_perms = ("view_feedback", "view_company_feedback")
+
+    def get(self, request):
+        visits = Visit.objects.exclude(feedback_kind="").select_related("employee__user", "service", "company", "recorded_by")
+        if not has_perm(request.user, "view_feedback"):
+            company = get_company(request.user)
+            visits = visits.filter(company=company) if company else visits.none()
+        if request.query_params.get("kind"):
+            visits = visits.filter(feedback_kind=request.query_params["kind"])
+        visits = filter_visits(request, visits).order_by("-feedback_at")
+        return Response(VisitSerializer(visits, many=True).data)
+
 
 class PaymentViewSet(viewsets.ModelViewSet):
     """
@@ -785,7 +1029,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
         )
         total = unpaid.aggregate(s=Sum("price"))["s"]
         if not total and not unpaid.exists():
-            raise ValidationError("There are no unpaid visits for this company in that period.")
+            raise ValidationError("There are no unpaid services for this company in that period.")
 
         with transaction.atomic():
             payment = serializer.save(amount=money(total), recorded_by=request.user)
@@ -852,7 +1096,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
                 "employee__department",
             )
             .annotate(visits=Count("id"), amount=Sum("price"))
-            .order_by("company__name", "employee__user__first_name", "employee__user__last_name")
+            .order_by("company__name", "employee__user__last_name", "employee__user__first_name")
         )
 
         companies = {}
@@ -867,7 +1111,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
             company["employees"].append({
                 "employee": row["employee_id"],
                 "employee_code": row["employee__employee_id"],
-                "employee_name": f'{row["employee__user__first_name"]} {row["employee__user__last_name"]}'.strip(),
+                "employee_name": f'{row["employee__user__last_name"]} {row["employee__user__first_name"]}'.strip(),
                 "department": row["employee__department"],
                 "visits": row["visits"],
                 "amount": money(row["amount"]),
@@ -934,6 +1178,53 @@ class UserViewSet(viewsets.ModelViewSet):
         elif params.get("kind") == "employees":
             users = users.filter(employee__isnull=False)
         return users.distinct()
+
+    @action(detail=True, methods=["get"])
+    def access(self, request, pk=None):
+        """
+        GET /api/users/<id>/access/ -> what this login may do, and which role
+        gives each permission (to take one away, switch it off in every role
+        listed next to it).
+        """
+        account = self.get_object()
+        profile = getattr(account, "userprofile", None)
+        roles = list(profile.roles.prefetch_related("permissions").order_by("name")) if profile else []
+        counting = {role.pk for role in active_roles(profile)} if profile else set()
+
+        sources = {}  # permission code -> names of the roles that give it
+        for role in roles:
+            if role.pk not in counting:
+                continue
+            for permission in role.permissions.all():
+                sources.setdefault(permission.code, []).append(role.name)
+        if account.is_superuser:
+            # A Django superuser does what the Super admin role allows, with or without the role
+            super_admin = Role.objects.filter(code=Role.SUPER_ADMIN).first()
+            label = super_admin.name if super_admin else "Super admin"
+            for code in get_permissions(account):
+                if label not in sources.setdefault(code, []):
+                    sources[code].append(label)
+
+        permissions = Permission.objects.filter(code__in=sources)
+        return Response({
+            "user": account.id,
+            "username": account.username,
+            "is_superuser": account.is_superuser,
+            "roles": [
+                {"id": role.id, "code": role.code, "name": role.name, "counts": role.pk in counting}
+                for role in roles
+            ],
+            "permissions": [
+                {
+                    "code": p.code,
+                    "name": p.name,
+                    "description": p.description,
+                    "area": p.area,
+                    "roles": sources[p.code],
+                }
+                for p in permissions.order_by("area", "name")
+            ],
+        })
 
     @action(detail=True, methods=["post"], url_path="set-password")
     def set_password(self, request, pk=None):

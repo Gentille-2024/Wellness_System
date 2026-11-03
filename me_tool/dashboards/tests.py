@@ -34,7 +34,16 @@ class PageAccessTests(TestCase):
         response = self.get(self.hr, "/?month=2026-10")
         self.assertContains(response, "75.0%")          # participation
         self.assertContains(response, "RWF 26,000")     # spend
-        self.assertContains(response, "John Doe")        # names: EUCL only
+        self.assertContains(response, "Doe John")        # names: EUCL only
+
+    def test_eucl_sees_who_came_to_a_company(self):
+        response = self.get(self.admin, "/companies/1/?month=2026-10")
+        self.assertContains(response, 'id="who-came"')
+        self.assertContains(response, "Doe John")
+        self.assertEqual(response.context["who_came"][0]["services"].count(",") + 1,
+                         len(response.context["who_came"][0]["services"].split(", ")))
+        # the company list links straight to it
+        self.assertContains(self.get(self.admin, "/companies/?month=2026-10"), "#who-came")
 
     def test_company_staff_only_see_their_company(self):
         response = self.get(self.boss, "/?month=2026-10")
@@ -42,7 +51,8 @@ class PageAccessTests(TestCase):
         response = self.get(self.boss, "/companies/1/?month=2026-10")
         self.assertContains(response, "RWF 11,000")
         self.assertNotContains(response, "BlueSpa")
-        self.assertNotContains(response, "John Doe")
+        self.assertNotContains(response, "Doe John")
+        self.assertNotContains(response, 'id="who-came"')
         self.assertEqual(self.get(self.boss, "/companies/2/").status_code, 404)
         self.assertEqual(self.get(self.boss, "/companies/").status_code, 403)
         # the ?company= filter can't widen what they see

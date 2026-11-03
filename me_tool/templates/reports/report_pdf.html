@@ -56,7 +56,7 @@
     <div class="kpi"><div class="label">Employees who came</div><div class="value">{{ kpis.participants|intcomma }}</div><div class="foot">{{ kpis.participants_change|change }} vs previous {{ unit }}</div></div>
     {% endif %}
     <div class="kpi"><div class="label">Services used</div><div class="value">{{ kpis.visits|intcomma }}</div><div class="foot">{{ kpis.visits_change|change }} vs previous {{ unit }}</div></div>
-    <div class="kpi"><div class="label">Amount</div><div class="value">{{ kpis.spend|rwf }}</div><div class="foot">{{ kpis.cost_per_visit|rwf }} per visit</div></div>
+    <div class="kpi"><div class="label">Amount</div><div class="value">{{ kpis.spend|rwf }}</div><div class="foot">{{ kpis.cost_per_visit|rwf }} per service</div></div>
     <div class="kpi"><div class="label">Still owed</div><div class="value">{{ kpis.unpaid|rwf }}</div><div class="foot">for this {{ unit }}</div></div>
   </div>
 
@@ -93,7 +93,7 @@
 
   <h2>Service performance</h2>
   <table>
-    <thead><tr><th>Service</th>{% if all_companies %}<th>Company</th>{% endif %}<th class="num">EUCL pays</th><th class="num">Visits</th><th class="num">Change</th><th class="num">Employees</th><th class="num">Amount</th><th class="num">Share</th></tr></thead>
+    <thead><tr><th>Service</th>{% if all_companies %}<th>Company</th>{% endif %}<th class="num">Price</th><th class="num">Services</th><th class="num">Change</th><th class="num">Employees</th><th class="num">Amount</th><th class="num">Share</th></tr></thead>
     <tbody>
     {% for s in services %}
       <tr><td>{{ s.name }}</td>{% if all_companies %}<td>{{ s.company }}</td>{% endif %}<td class="num">{% if s.covered %}{{ s.eucl_price|rwf }}{% else %}not covered{% endif %}</td><td class="num">{{ s.visits|intcomma }}</td><td class="num">{{ s.change|change }}</td><td class="num">{{ s.participants }}</td><td class="num">{{ s.spend|rwf }}</td><td class="num">{{ s.share|pct }}</td></tr>
@@ -106,20 +106,20 @@
   {% if all_companies %}
   <h2>Companies</h2>
   <table>
-    <thead><tr><th>Company</th><th class="num">Visits</th><th class="num">Employees</th><th class="num">Amount</th><th class="num">Still owed</th><th style="width:22%">Share of spending</th></tr></thead>
+    <thead><tr><th>Company</th><th class="num">Services</th><th class="num">Employees</th><th class="num">Amount</th><th class="num">Still owed</th><th style="width:22%">Share of spending</th></tr></thead>
     <tbody>
     {% for c in companies %}
       <tr><td>{{ c.company__name }}</td><td class="num">{{ c.visits|intcomma }}</td><td class="num">{{ c.participants }}</td><td class="num">{{ c.spend|rwf }}</td><td class="num">{{ c.unpaid|rwf }}</td><td><div class="bar"><span style="width: {{ c.share|bar_width }}%"></span></div><span class="muted">{{ c.share|pct }}</span></td></tr>
     {% empty %}
-      <tr><td colspan="6" class="muted">No visits in this {{ unit }}.</td></tr>
+      <tr><td colspan="6" class="muted">No services used in this {{ unit }}.</td></tr>
     {% endfor %}
     </tbody>
   </table>
   {% endif %}
 
-  <h2>{% if all_companies %}Participation by department{% else %}Visitors by department{% endif %}</h2>
+  <h2>{% if all_companies %}Participation by department{% else %}Employees by department{% endif %}</h2>
   <table class="avoid-break">
-    <thead><tr><th>Department</th>{% if all_companies %}<th class="num">Active employees</th>{% endif %}<th class="num">Employees who came</th>{% if all_companies %}<th class="num">Participation</th>{% endif %}<th class="num">Visits</th><th class="num">Amount</th></tr></thead>
+    <thead><tr><th>Department</th>{% if all_companies %}<th class="num">Active employees</th>{% endif %}<th class="num">Employees who came</th>{% if all_companies %}<th class="num">Participation</th>{% endif %}<th class="num">Services</th><th class="num">Amount</th></tr></thead>
     <tbody>
     {% for d in departments %}{% if all_companies or d.visits %}
       <tr><td>{{ d.department }}</td>{% if all_companies %}<td class="num">{{ d.employees }}</td>{% endif %}<td class="num">{{ d.participants }}</td>{% if all_companies %}<td class="num">{{ d.participation|pct }}</td>{% endif %}<td class="num">{{ d.visits }}</td><td class="num">{{ d.spend|rwf }}</td></tr>
@@ -130,10 +130,10 @@
   {% if include_names and employees %}
   <h2>Most active employees</h2>
   <table>
-    <thead><tr><th>Employee</th><th>ID</th><th>Department</th><th class="num">Visits</th><th class="num">Days</th><th class="num">Amount</th></tr></thead>
+    <thead><tr><th>Employee</th><th>ID</th><th>Department</th><th class="num">Services</th><th class="num">Days</th><th class="num">Amount</th></tr></thead>
     <tbody>
     {% for e in employees %}
-      <tr><td>{{ e.employee__first_name }} {{ e.employee__last_name }}</td><td>{{ e.employee__code }}</td><td>{{ e.employee__department }}</td><td class="num">{{ e.visits }}</td><td class="num">{{ e.days }}</td><td class="num">{{ e.spend|rwf }}</td></tr>
+      <tr><td>{{ e.employee__last_name }} {{ e.employee__first_name }}</td><td>{{ e.employee__code }}</td><td>{{ e.employee__department }}</td><td class="num">{{ e.visits }}</td><td class="num">{{ e.days }}</td><td class="num">{{ e.spend|rwf }}</td></tr>
     {% endfor %}
     </tbody>
   </table>

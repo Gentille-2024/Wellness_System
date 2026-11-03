@@ -94,8 +94,8 @@ The **System resources** page (menu: Settings) watches what the tool runs on:
    python manage.py migrate
    ```
 2. In **Users & roles**, create a user for the M&E tool, e.g. `me_sync`, with
-   the role **M&E sync service**. Give **M&E officer** to whoever follows the
-   indicators (EUCL HR can already open the M&E tool).
+   the role **M&E officer** (it includes "Export data for M&E"). Give **M&E officer**
+   to whoever follows the indicators too (HR can already open the M&E tool).
 3. Let Docker reach the API: in the wellness `.env`, add
    `host.docker.internal` to `DJANGO_ALLOWED_HOSTS`, then run Django on all
    interfaces:

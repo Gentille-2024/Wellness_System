@@ -188,6 +188,40 @@ def month_visits(month, scope):
     )
 
 
+def who_came(month, scope):
+    """
+    The EUCL employees who came, newest day first: one line per employee per
+    day with the services they used (joined with commas) and the amount.
+    Only for people allowed to see employee names.
+    """
+    lines = {}
+    visits = (
+        visits_in(month, scope)
+        .select_related("employee", "service")
+        .order_by("-visit_date", "visited_at", "service__name")
+    )
+    for visit in visits:
+        key = (visit.employee_id, visit.visit_date)
+        line = lines.get(key)
+        if line is None:
+            line = lines[key] = {
+                "date": visit.visit_date,
+                "time": visit.visited_at,  # the first service of the day: when they arrived
+                "name": visit.employee.name,
+                "code": visit.employee.code,
+                "department": visit.employee.department,
+                "services": [],
+                "amount": 0,
+            }
+        line["services"].append(visit.service.name)
+        line["amount"] += visit.price
+    rows = list(lines.values())
+    for row in rows:
+        row["services"] = ", ".join(row["services"])
+    return rows
+
+
 __all__ = [
     "kpis", "trend", "by_company", "by_service", "by_department", "top_employees", "month_visits", "participants",
+    "who_came",
 ]

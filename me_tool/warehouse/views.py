@@ -18,7 +18,7 @@ def sync_status(request):
             "Services": Service.objects.count(),
             "EUCL employees": Employee.objects.count(),
             "Payments": Payment.objects.count(),
-            "Visits": Visit.objects.count(),
+            "Services used": Visit.objects.count(),
         },
     })
 

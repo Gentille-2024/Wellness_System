@@ -5,6 +5,18 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EUCL Wellness Management System</title>
+    <script>
+      // Light or dark before the page draws (no flash): the saved choice, else the device setting
+      try {
+        var saved = localStorage.getItem('theme')
+        var themes = ['light', 'dark', 'ocean']
+        document.documentElement.dataset.theme = themes.indexOf(saved) >= 0
+          ? saved
+          : window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+      } catch (e) {
+        document.documentElement.dataset.theme = 'light'
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

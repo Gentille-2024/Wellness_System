@@ -1,4 +1,4 @@
-import { Link } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { useAuth } from '../auth/AuthContext'
 import { can } from '../auth/access'
 import { DailyChart } from '../components/charts'
@@ -9,6 +9,7 @@ import { formatDateTime, formatMoney } from '../utils/format'
 // EUCL side: the whole platform at a glance
 export default function EuclDashboard() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const stats = useApi('/stats/', { scope: 'platform' })
   const canSeeVisits = can(user, 'view_all_visits', 'manage_payments')
   const recent = useApi(canSeeVisits ? '/visits/' : null, { today: 1 })
@@ -34,31 +35,37 @@ export default function EuclDashboard() {
       <div className="stat-grid">
         <StatCard label="Open companies" value={data.companies_open} hint={`${data.companies_deactivated} deactivated · ${data.companies_deleted} deleted`} icon="building" />
         <StatCard label="EUCL employees" value={data.employees} hint={`${data.active_employees} active`} icon="users" tone="info" />
-        <StatCard label="Visits today" value={data.visits_today} hint={`${data.visits_this_month} this month`} icon="checkin" tone="warning" />
-        <StatCard label="Amount this month" value={formatMoney(data.amount_this_month)} hint={`${data.total_visits} visits in total`} icon="money" tone="success" />
+        <StatCard label="Services today" value={data.visits_today} hint={`${data.visits_this_month} this month`} icon="checkin" tone="warning" />
+        <StatCard label="Amount this month" value={formatMoney(data.amount_this_month)} hint={`${data.total_visits} services in total`} icon="money" tone="success" />
         <StatCard label="Unpaid to companies" value={formatMoney(data.unpaid)} hint={`${formatMoney(data.paid)} paid so far`} icon="card" tone="danger" />
       </div>
 
       <div className="grid-2-1">
-        <Card title="Visits" subtitle="Last 14 days">
+        <Card title="Services" subtitle="Last 14 days">
           <DailyChart days={data.daily} />
         </Card>
 
-        <Card title="By company" subtitle="Amount of all visits" flush>
+        <Card title="By company" subtitle={canSeeVisits ? 'Click a company to see its employees, by month' : 'Amount of all services used'} flush>
           {data.by_company.length ? (
             <div className="table-wrap">
               <table className="table">
                 <thead>
                   <tr>
                     <th>Company</th>
-                    <th className="num">Visits</th>
+                    <th className="num">Services</th>
                     <th className="num">Unpaid</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.by_company.map((row) => (
-                    <tr key={row.company}>
-                      <td className="cell-main">{row.company}</td>
+                    <tr
+                      key={row.company_id}
+                      className={canSeeVisits ? 'row-link' : ''}
+                      onClick={canSeeVisits ? () => navigate(`/eucl/activity/${row.company_id}`) : undefined}
+                    >
+                      <td className="cell-main">
+                        {canSeeVisits ? <Link to={`/eucl/activity/${row.company_id}`}>{row.company}</Link> : row.company}
+                      </td>
                       <td className="num">{row.visits}</td>
                       <td className="num">{formatMoney(row.unpaid)}</td>
                     </tr>
@@ -67,14 +74,14 @@ export default function EuclDashboard() {
               </table>
             </div>
           ) : (
-            <EmptyState icon="building" title="No visits yet" />
+            <EmptyState icon="building" title="No services used yet" />
           )}
         </Card>
       </div>
 
       {canSeeVisits && (
         <Card
-          title="Today's visits"
+          title="Today's services"
           flush
           actions={
             <Link to="/eucl/visits" className="btn btn-ghost btn-sm">
@@ -111,7 +118,7 @@ export default function EuclDashboard() {
               </table>
             </div>
           ) : (
-            <EmptyState icon="clock" title="No visits yet today" />
+            <EmptyState icon="clock" title="No services used yet today" />
           )}
         </Card>
       )}

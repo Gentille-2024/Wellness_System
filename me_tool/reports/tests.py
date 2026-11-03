@@ -38,8 +38,8 @@ class ReportTests(TestCase):
         self.assertEqual(download.status_code, 200)
         self.assertIn("wellness-me-monthly-2026-10-all-companies.xlsx", download["Content-Disposition"])
         wb = load_workbook(BytesIO(b"".join(download.streaming_content)))
-        self.assertEqual(wb.sheetnames, ["Summary", "Indicators", "Services", "Companies", "Departments", "Most active employees", "Visits"])
-        visits = wb["Visits"]
+        self.assertEqual(wb.sheetnames, ["Summary", "Indicators", "Services", "Companies", "Departments", "Most active employees", "Services used"])
+        visits = wb["Services used"]
         self.assertEqual(visits.cell(visits.max_row, 1).value, "Total")
         amount_col = [c.value for c in visits[4]].index("Amount (RWF)") + 1
         self.assertEqual(visits.cell(visits.max_row, amount_col).value, 26000)
@@ -53,8 +53,8 @@ class ReportTests(TestCase):
         wb = load_workbook(report.file.path)
         self.assertNotIn("Companies", wb.sheetnames)
         self.assertNotIn("Most active employees", wb.sheetnames)
-        self.assertNotIn("Employee", [c.value for c in wb["Visits"][4]])
-        self.assertEqual(wb["Visits"].max_row, 4 + 3 + 1)  # header row, 3 FitZone visits, total
+        self.assertNotIn("Employee", [c.value for c in wb["Services used"][4]])
+        self.assertEqual(wb["Services used"].max_row, 4 + 3 + 1)  # header row, 3 FitZone visits, total
 
     def test_company_staff_cannot_ask_for_other_companies(self):
         self.assertEqual(self.create(self.boss, company="2").status_code, 404)
@@ -80,7 +80,7 @@ class ReportTests(TestCase):
         html = render_to_string("reports/report_pdf.html", {**report_data(report), "report": report})
         self.assertIn("Indicators: targets vs actuals", html)
         self.assertIn("RWF 26,000", html)
-        self.assertIn("John Doe", html)
+        self.assertIn("Doe John", html)
 
     @skipUnless(HAS_WEASYPRINT, "WeasyPrint needs Pango (installed in the Docker image)")
     def test_pdf_report(self):
@@ -113,7 +113,7 @@ class PeriodReportTests(TestCase):
         self.assertEqual(report.filename, "wellness-me-weekly-2026-W41-all-companies.xlsx")
         wb = load_workbook(report.file.path)
         self.assertNotIn("Indicators", wb.sheetnames)  # targets are monthly
-        visits = wb["Visits"]
+        visits = wb["Services used"]
         amount_col = [c.value for c in visits[4]].index("Amount (RWF)") + 1
         self.assertEqual(visits.cell(visits.max_row, amount_col).value, 18000)
         summary = [row[0].value for row in wb["Summary"].iter_rows(min_row=1, max_row=30)]
@@ -124,7 +124,7 @@ class PeriodReportTests(TestCase):
         report = Report.objects.get()
         self.assertEqual(report.status, Report.DONE, report.error)
         wb = load_workbook(report.file.path)
-        self.assertEqual(wb["Visits"].max_row, 4 + 2 + 1)  # John's 2 visits on 2 October, then the total
+        self.assertEqual(wb["Services used"].max_row, 4 + 2 + 1)  # John's 2 visits on 2 October, then the total
 
     def test_no_report_for_a_period_that_has_not_started(self):
         self.create(self.hr, period="month", date="2099-01-15")

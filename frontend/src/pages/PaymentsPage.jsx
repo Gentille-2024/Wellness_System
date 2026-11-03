@@ -12,7 +12,7 @@ const SHOW_OPTIONS = [
   { value: 'yes', label: 'Paid' },
   { value: '', label: 'All' },
 ]
-const SHOW_LABELS = { no: 'Still owed', yes: 'Paid', '': 'All visits (paid and owed)' }
+const SHOW_LABELS = { no: 'Still owed', yes: 'Paid', '': 'All services (paid and owed)' }
 const EMPTY_DATES = { date_from: '', date_to: '' }
 
 /**
@@ -139,7 +139,7 @@ export default function PaymentsPage({ scope }) {
           tone="danger"
         />
         <StatCard label="Paid" value={formatMoney(totals.paid)} icon="money" tone="success" />
-        <StatCard label="Total value of visits" value={formatMoney(totals.total)} hint={plural(totals.visits, 'visit')} icon="activity" tone="info" />
+        <StatCard label="Total value of services" value={formatMoney(totals.total)} hint={plural(totals.visits, 'service')} icon="activity" tone="info" />
         {!isEucl && <StatCard label="Employees attended" value={rows[0]?.employees ?? 0} icon="users" />}
       </div>
 
@@ -154,7 +154,7 @@ export default function PaymentsPage({ scope }) {
                   <tr>
                     <th>Company</th>
                     <th className="num">Employees attended</th>
-                    <th className="num">Visits</th>
+                    <th className="num">Services</th>
                     <th className="num">Total</th>
                     <th className="num">Paid</th>
                     <th className="num">Owed</th>
@@ -183,7 +183,7 @@ export default function PaymentsPage({ scope }) {
                 <tfoot>
                   <tr>
                     <td>Total · {plural(rows.length, 'company', 'companies')}</td>
-                    <td className="num" title="An employee who visited several companies is counted at each one">{totals.employees}</td>
+                    <td className="num" title="An employee who went to several companies is counted at each one">{totals.employees}</td>
                     <td className="num">{totals.visits}</td>
                     <td className="num">{formatMoney(totals.total)}</td>
                     <td className="num">{formatMoney(totals.paid)}</td>
@@ -208,7 +208,7 @@ export default function PaymentsPage({ scope }) {
                   <tr>
                     <th>Employee</th>
                     <th>Department</th>
-                    <th className="num">Visits</th>
+                    <th className="num">Services</th>
                     <th className="num">Amount</th>
                   </tr>
                 </thead>
@@ -253,7 +253,7 @@ export default function PaymentsPage({ scope }) {
                   <th>Paid on</th>
                   {isEucl && <th>Company</th>}
                   <th>Period</th>
-                  <th className="num">Visits</th>
+                  <th className="num">Services</th>
                   <th className="num">Amount</th>
                   <th>Reference</th>
                 </tr>
@@ -291,7 +291,7 @@ export default function PaymentsPage({ scope }) {
           defaultCompanyId={paying.companyId}
           onClose={() => setPaying(null)}
           onSaved={(payment) => {
-            setNotice(`${formatMoney(payment.amount)} to ${payment.company_name} recorded as paid (${payment.visit_count} visits).`)
+            setNotice(`${formatMoney(payment.amount)} to ${payment.company_name} recorded as paid (${payment.visit_count} services).`)
             setPaying(null)
             balances.reload()
             statement.reload()

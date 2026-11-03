@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import api from '../api/client'
-import { PERMISSION_AREAS } from '../auth/access'
+import { groupByArea, sortRoles } from '../auth/access'
+import { FEEDBACK_KINDS } from '../utils/feedback'
 import Icon from './Icon'
 import useApi from '../hooks/useApi'
 import useForm from '../hooks/useForm'
-import { formatMoney, monthStartISO, todayISO } from '../utils/format'
+import { formatDate, formatMoney, monthStartISO, todayISO } from '../utils/format'
 import { Alert, CheckboxGroup, Field, Loading, Modal, SelectField, TextAreaField } from './ui'
 
 // Pop-up forms shared by several pages. Each one calls onSaved(result) after a
@@ -30,6 +31,7 @@ export function EmployeeFormModal({ employee, onClose, onSaved }) {
   const form = useForm(
     editing
       ? {
+          employee_id: employee.employee_id,
           first_name: employee.first_name,
           last_name: employee.last_name,
           email: employee.email,
@@ -38,15 +40,13 @@ export function EmployeeFormModal({ employee, onClose, onSaved }) {
           position: employee.position,
         }
       : {
+          employee_id: '',
           first_name: '',
           last_name: '',
-          username: '',
           email: '',
           phone: '',
           department: '',
           position: '',
-          password: '',
-          password_confirm: '',
         },
   )
   const { values, errors, handleChange } = form
@@ -62,7 +62,11 @@ export function EmployeeFormModal({ employee, onClose, onSaved }) {
     <Modal
       wide
       title={editing ? `Edit ${employee.user_name}` : 'Onboard EUCL employee'}
-      subtitle={editing ? employee.employee_id : 'All fields are required. The employee logs in with this username and password.'}
+      subtitle={
+        editing
+          ? employee.employee_id
+          : 'All fields are required. The username is the last name; the employee creates their password at first sign-in with their Employee ID and their email or phone.'
+      }
       onClose={onClose}
       footer={<FormFooter onClose={onClose} submitting={form.submitting} label={editing ? 'Save changes' : 'Onboard employee'} formId="employee-form" />}
     >
@@ -70,27 +74,18 @@ export function EmployeeFormModal({ employee, onClose, onSaved }) {
         <Alert>{errors._general}</Alert>
         <h3 className="form-section">Personal details</h3>
         <div className="form-grid">
+          <Field label="Employee ID" name="employee_id" value={values.employee_id} onChange={handleChange} error={errors.employee_id} placeholder="e.g. EMP0101" hint="Given by HR. Must be unique." required />
+          <span />
+          <Field label="Last name" name="last_name" value={values.last_name} onChange={handleChange} error={errors.last_name} placeholder="Family name, e.g. NATUKUNDA" required />
           <Field label="First name" name="first_name" value={values.first_name} onChange={handleChange} error={errors.first_name} required />
-          <Field label="Last name" name="last_name" value={values.last_name} onChange={handleChange} error={errors.last_name} required />
-          <Field label="Email" name="email" type="email" value={values.email} onChange={handleChange} error={errors.email} required />
+          <Field label="Email" name="email" type="email" value={values.email} onChange={handleChange} error={errors.email} placeholder="name@example.com" required />
           <Field label="Phone" name="phone" type="tel" value={values.phone} onChange={handleChange} error={errors.phone} placeholder="+250 788 123 456" required />
         </div>
         <h3 className="form-section">Job at EUCL</h3>
         <div className="form-grid">
-          <Field label="Department" name="department" value={values.department} onChange={handleChange} error={errors.department} required />
+          <Field label="Department" name="department" value={values.department} onChange={handleChange} error={errors.department} hint="Employees in HR get the HR role." required />
           <Field label="Position" name="position" value={values.position} onChange={handleChange} error={errors.position} required />
         </div>
-        {!editing && (
-          <>
-            <h3 className="form-section">Login</h3>
-            <div className="form-grid">
-              <Field label="Username" name="username" value={values.username} onChange={handleChange} error={errors.username} autoComplete="off" required />
-              <span />
-              <Field label="Password" name="password" type="password" value={values.password} onChange={handleChange} error={errors.password} autoComplete="new-password" hint="At least 8 characters, not too common." required />
-              <Field label="Confirm password" name="password_confirm" type="password" value={values.password_confirm} onChange={handleChange} error={errors.password_confirm} autoComplete="new-password" required />
-            </div>
-          </>
-        )}
       </form>
     </Modal>
   )
@@ -99,8 +94,9 @@ export function EmployeeFormModal({ employee, onClose, onSaved }) {
 // ------------------------------------------------------------------ user
 
 /**
- * Create / edit a login with one or more roles (roles come from the database).
- * platform: the super admin's version (all roles, super admin switch, any company).
+ * Create / edit a login. Every login has exactly ONE role (roles come from the
+ * database), because each role has its own permissions.
+ * platform: the super admin's version (all roles, any company).
  * fixedCompanyId: a company boss adding staff to their own company.
  */
 export function UserFormModal({ account, companies = [], platform = false, fixedCompanyId, onClose, onSaved }) {
@@ -113,24 +109,24 @@ export function UserFormModal({ account, companies = [], platform = false, fixed
     last_name: account?.last_name ?? '',
     username: account?.username ?? '',
     email: account?.email ?? '',
-    roles: (account?.roles ?? []).filter((code) => code !== 'EMPLOYEE'),
+    roles: (account?.roles ?? []).slice(0, 1),
     company: account?.company ? String(account.company) : fixedCompanyId ? String(fixedCompanyId) : '',
-    is_superuser: account?.is_superuser ?? false,
     ...(editing ? {} : { password: '', password_confirm: '' }),
   })
   const { values, errors, handleChange, setValues } = form
   const [addingRole, setAddingRole] = useState(false)
+  const chooseRole = (selected) => setValues((prev) => ({ ...prev, roles: selected.slice(-1) }))
 
-  // Only roles that can be ticked here: never Employee (it comes from onboarding)
-  const roleOptions = (roles.data ?? [])
-    .filter((role) => role.code !== 'EMPLOYEE')
-    .filter((role) => platform || role.is_company_role)
-  const needsCompany = roleOptions.some((role) => role.is_company_role && values.roles.includes(role.code))
+  const allRoles = roles.data ?? []
+  // A company boss chooses among the company roles (Boss only for someone who already has it)
+  const roleOptions = platform
+    ? allRoles
+    : allRoles.filter((role) => role.is_company_role && (role.code !== 'COMPANY_BOSS' || values.roles.includes('COMPANY_BOSS')))
+  const needsCompany = allRoles.some((role) => role.is_company_role && values.roles.includes(role.code))
 
   const save = form.submit(async (formValues) => {
     const payload = { ...formValues, company: needsCompany && formValues.company ? Number(formValues.company) : null }
-    if (!platform) delete payload.is_superuser
-    if (isEmployee) payload.roles = [...payload.roles, 'EMPLOYEE']
+    delete payload.is_superuser // the Super admin role decides it
     const { data } = editing ? await api.patch(`/users/${account.id}/`, payload) : await api.post('/users/', payload)
     onSaved(data)
   })
@@ -143,44 +139,56 @@ export function UserFormModal({ account, companies = [], platform = false, fixed
         editing
           ? null
           : platform
-            ? 'Tick one or more roles. Roles and their permissions are managed under Users & roles → Roles.'
-            : 'Switch on the roles this person needs: each role opens a page of the company dashboard.'
+            ? 'Choose one role. Roles and their permissions are managed under Users & roles → Roles.'
+            : 'Choose the role this person has: it decides which pages of the company dashboard they open.'
       }
       onClose={onClose}
-      footer={<FormFooter onClose={onClose} submitting={form.submitting} label={editing ? 'Save changes' : 'Create login'} formId="user-form" />}
+      footer={
+        <FormFooter onClose={onClose} submitting={form.submitting} label={editing ? 'Save changes' : 'Create login'} formId="user-form" disabled={values.roles.length !== 1} />
+      }
     >
       <form id="user-form" onSubmit={save}>
         <Alert>{errors._general}</Alert>
         <div className="form-grid">
-          <Field label="First name" name="first_name" value={values.first_name} onChange={handleChange} error={errors.first_name} required />
           <Field label="Last name" name="last_name" value={values.last_name} onChange={handleChange} error={errors.last_name} required={!account || Boolean(account.last_name)} />
+          <Field label="First name" name="first_name" value={values.first_name} onChange={handleChange} error={errors.first_name} required />
           <Field label="Username" name="username" value={values.username} onChange={handleChange} error={errors.username} autoComplete="off" required />
           <Field label="Email" name="email" type="email" value={values.email} onChange={handleChange} error={errors.email} required />
         </div>
 
         {roles.loading ? (
           <Loading text="Loading roles…" />
-        ) : !platform ? (
-          <RoleSwitches
-            options={sortPageRoles(roleOptions.filter((role) => role.code !== 'COMPANY_BOSS'))}
-            value={values.roles}
-            onChange={(selected) => setValues((prev) => ({ ...prev, roles: selected }))}
-            onAddRole={() => setAddingRole(true)}
-            error={errors.roles}
-          />
         ) : (
-          <CheckboxGroup
-            label="Roles"
-            options={roleOptions.map((role) => ({
-              value: role.code,
-              label: role.is_company_role ? `${role.name} (company)` : role.name,
-              description: role.description,
-            }))}
-            value={values.roles}
-            onChange={(selected) => setValues((prev) => ({ ...prev, roles: selected }))}
-            error={errors.roles}
-            hint={isEmployee ? 'This person is also an EUCL employee; that stays.' : null}
-          />
+          <>
+            <CheckboxGroup
+              single
+              name="role"
+              label="Role"
+              options={sortRoles(roleOptions).map((role) => {
+                // The Employee role is only for people HR added as EUCL employees
+                const employeeOnly = role.code === 'EMPLOYEE' && !isEmployee
+                return {
+                  value: role.code,
+                  label: role.name,
+                  description: employeeOnly ? 'Only for EUCL employees: add them on the EUCL employees page.' : role.description,
+                  disabled: employeeOnly,
+                }
+              })}
+              value={values.roles}
+              onChange={chooseRole}
+              error={errors.roles}
+              hint={
+                isEmployee
+                  ? 'One role per person. This person is an EUCL employee: that record stays whatever role you choose.'
+                  : 'One role per person: each role has its own permissions.'
+              }
+            />
+            {!platform && (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAddingRole(true)}>
+                <Icon name="plus" size={14} /> Add role
+              </button>
+            )}
+          </>
         )}
 
         {needsCompany && !fixedCompanyId && (
@@ -192,16 +200,6 @@ export function UserFormModal({ account, companies = [], platform = false, fixed
               </option>
             ))}
           </SelectField>
-        )}
-
-        {platform && (
-          <label className="checkbox-card">
-            <input type="checkbox" name="is_superuser" checked={values.is_superuser} onChange={handleChange} aria-label="Super admin" />
-            <span>
-              <span className="checkbox-title">Super admin</span>
-              <span className="checkbox-description">Every permission on the whole platform. Give this to very few people.</span>
-            </span>
-          </label>
         )}
 
         {!editing && (
@@ -219,62 +217,12 @@ export function UserFormModal({ account, companies = [], platform = false, fixed
           onSaved={(role) => {
             setAddingRole(false)
             roles.reload()
-            // The new role is switched on for this person straight away
-            setValues((prev) => ({ ...prev, roles: [...prev.roles, role.code] }))
+            // The new role becomes this person's role straight away
+            setValues((prev) => ({ ...prev, roles: [role.code] }))
           }}
         />
       )}
     </Modal>
-  )
-}
-
-// The company pages in the order of the menu; any other company role comes after
-const PAGE_ROLE_ORDER = ['COMPANY_DASHBOARD', 'COMPANY_RECORD_VISITS', 'COMPANY_SERVICES', 'COMPANY_EMPLOYEES_ATTENDED', 'COMPANY_ATTENDANCE']
-
-function sortPageRoles(roles) {
-  const rank = (role) => {
-    const index = PAGE_ROLE_ORDER.indexOf(role.code)
-    return index === -1 ? PAGE_ROLE_ORDER.length : index
-  }
-  return [...roles].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name))
-}
-
-// "All" plus one on/off switch per role. Roles not in `options` (e.g. the
-// boss's own role when they edit themselves) are kept as they are.
-function RoleSwitches({ options, value, onChange, onAddRole, error }) {
-  const codes = options.map((role) => role.code)
-  const allOn = codes.length > 0 && codes.every((code) => value.includes(code))
-  const others = value.filter((code) => !codes.includes(code))
-
-  const toggle = (code) => onChange(value.includes(code) ? value.filter((c) => c !== code) : [...value, code])
-  const toggleAll = () => onChange(allOn ? others : [...others, ...codes])
-
-  return (
-    <fieldset className="role-switches">
-      <legend className="field-label">Roles</legend>
-      <div className="switch-list">
-        <label className="switch-row switch-row-all">
-          <span className="switch-text">
-            <span className="checkbox-title">All</span>
-            <span className="checkbox-description">Every page below</span>
-          </span>
-          <input type="checkbox" role="switch" className="switch" checked={allOn} onChange={toggleAll} aria-label="All roles" />
-        </label>
-        {options.map((role) => (
-          <label key={role.code} className="switch-row">
-            <span className="switch-text">
-              <span className="checkbox-title">{role.name}</span>
-              {role.description && <span className="checkbox-description">{role.description}</span>}
-            </span>
-            <input type="checkbox" role="switch" className="switch" checked={value.includes(role.code)} onChange={() => toggle(role.code)} aria-label={role.name} />
-          </label>
-        ))}
-      </div>
-      {error && <span className="field-error">{error}</span>}
-      <button type="button" className="btn btn-ghost btn-sm section-gap" onClick={onAddRole}>
-        <Icon name="plus" size={14} /> Add role
-      </button>
-    </fieldset>
   )
 }
 
@@ -306,26 +254,24 @@ export function PasswordModal({ account, onClose, onSaved }) {
 
 // forCompany: a company boss adds a role for their own company (company
 // pages only); the server limits the permissions they can choose.
-export function RoleFormModal({ role, forCompany = false, onClose, onSaved }) {
+export function RoleFormModal({ role, forCompany = false, withPermissions = true, onClose, onSaved }) {
   const editing = Boolean(role)
   const permissions = useApi('/permissions/')
   const form = useForm({
     name: role?.name ?? '',
     description: role?.description ?? '',
-    is_company_role: role?.is_company_role ?? forCompany,
     permissions: role?.permissions ?? [],
   })
   const { values, errors, handleChange, setValues } = form
 
   const save = form.submit(async (formValues) => {
-    const { data } = editing ? await api.patch(`/roles/${role.id}/`, formValues) : await api.post('/roles/', formValues)
+    const payload = { ...formValues }
+    if (!withPermissions && editing) delete payload.permissions // switched on the Roles page
+    const { data } = editing ? await api.patch(`/roles/${role.id}/`, payload) : await api.post('/roles/', payload)
     onSaved(data)
   })
 
-  const byArea = PERMISSION_AREAS.map((area) => ({
-    area,
-    items: (permissions.data ?? []).filter((permission) => permission.area === area),
-  })).filter((group) => group.items.length)
+  const byArea = groupByArea(permissions.data ?? [])
 
   return (
     <Modal
@@ -334,7 +280,9 @@ export function RoleFormModal({ role, forCompany = false, onClose, onSaved }) {
       subtitle={
         forCompany
           ? 'A role for your company’s staff: choose the pages it opens. Only your company sees it.'
-          : 'A role is a named set of permissions. Everyone with the role gets all of them.'
+          : withPermissions
+            ? 'A role is a named set of permissions. Everyone with the role gets all of them.'
+            : 'Name the role, then switch on its permissions. A role with only company permissions becomes a company role by itself.'
       }
       onClose={onClose}
       footer={<FormFooter onClose={onClose} submitting={form.submitting} label={editing ? 'Save role' : 'Create role'} formId="role-form" />}
@@ -346,16 +294,9 @@ export function RoleFormModal({ role, forCompany = false, onClose, onSaved }) {
           <Field label="Description" name="description" value={values.description} onChange={handleChange} error={errors.description} placeholder="What this person does" />
         </div>
 
-        {!forCompany && role?.code !== 'EMPLOYEE' && (
-          <label className="checkbox-card">
-            <input type="checkbox" name="is_company_role" checked={values.is_company_role} onChange={handleChange} aria-label="Company role" />
-            <span>
-              <span className="checkbox-title">Company role</span>
-              <span className="checkbox-description">People with this role work for one service provider (like a boss or receptionist).</span>
-            </span>
-          </label>
-        )}
 
+        {withPermissions && (
+          <>
         <h3 className="form-section section-gap">{forCompany ? 'Pages this role opens' : 'Permissions'}</h3>
         {errors.permissions && <span className="field-error">{errors.permissions}</span>}
         {permissions.loading ? (
@@ -371,6 +312,116 @@ export function RoleFormModal({ role, forCompany = false, onClose, onSaved }) {
             />
           ))
         )}
+          </>
+        )}
+      </form>
+    </Modal>
+  )
+}
+
+// -------------------------------------------------------------- feedback
+
+
+// An employee's feedback on one service they used (optional)
+export function FeedbackModal({ visit, onClose, onSaved }) {
+  const form = useForm({ kind: visit.feedback_kind || 'comment', message: visit.feedback_message || '' })
+  const { values, errors, handleChange, setValues } = form
+  const [removing, setRemoving] = useState(false)
+
+  const save = form.submit(async (formValues) => {
+    const { data } = await api.post(`/visits/${visit.id}/feedback/`, formValues)
+    onSaved(data, 'sent')
+  })
+
+  const remove = async () => {
+    setRemoving(true)
+    try {
+      const { data } = await api.delete(`/visits/${visit.id}/feedback/`)
+      onSaved(data, 'removed')
+    } finally {
+      setRemoving(false)
+    }
+  }
+
+  return (
+    <Modal
+      title="Feedback on this service"
+      subtitle={`${visit.service_name} at ${visit.company_name}, ${formatDate(visit.visit_date)}. HR, EUCL and the company will see it.`}
+      onClose={onClose}
+      footer={
+        <>
+          {visit.feedback_kind && (
+            <button type="button" className="btn btn-ghost text-danger" onClick={remove} disabled={removing} style={{ marginRight: 'auto' }}>
+              {removing ? 'Removing…' : 'Remove my feedback'}
+            </button>
+          )}
+          <FormFooter onClose={onClose} submitting={form.submitting} label="Send feedback" formId="feedback-form" />
+        </>
+      }
+    >
+      <form id="feedback-form" onSubmit={save}>
+        <Alert>{errors._general}</Alert>
+        <div className="field">
+          <span className="field-label">Type</span>
+          <div className="choice-list">
+            {FEEDBACK_KINDS.map((kind) => (
+              <label key={kind.value} className={values.kind === kind.value ? 'choice active' : 'choice'}>
+                <input type="radio" name="kind" value={kind.value} checked={values.kind === kind.value} onChange={() => setValues((prev) => ({ ...prev, kind: kind.value }))} />
+                <span>
+                  <span className="checkbox-title">{kind.label}</span>
+                  <span className="checkbox-description">{kind.description}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          {errors.kind && <span className="field-error">{errors.kind}</span>}
+        </div>
+        <TextAreaField
+          label="Message"
+          name="message"
+          value={values.message}
+          onChange={handleChange}
+          error={errors.message}
+          rows={4}
+          maxLength={1000}
+          placeholder={values.kind === 'complaint' ? 'What went wrong? e.g. I did not attend: I was at work that day' : 'Your comment'}
+          required
+        />
+      </form>
+    </Modal>
+  )
+}
+
+// ------------------------------------------------------------ permission
+
+// The super admin adds a permission; it can then be switched on for roles
+export function PermissionFormModal({ areas, onClose, onSaved }) {
+  const form = useForm({ name: '', description: '', area: areas[0] ?? 'EUCL' })
+  const { values, errors, handleChange } = form
+  const save = form.submit(async (formValues) => {
+    const { data } = await api.post('/permissions/', formValues)
+    onSaved(data)
+  })
+
+  return (
+    <Modal
+      title="New permission"
+      subtitle="Switch it on for the roles that should have it. A new permission is a label until a page of the system is made to check it."
+      onClose={onClose}
+      footer={<FormFooter onClose={onClose} submitting={form.submitting} label="Add permission" formId="permission-form" />}
+    >
+      <form id="permission-form" onSubmit={save}>
+        <Alert>{errors._general}</Alert>
+        <Field label="Name" name="name" value={values.name} onChange={handleChange} error={errors.name} placeholder="e.g. Approve refunds" required />
+        <Field label="Description" name="description" value={values.description} onChange={handleChange} error={errors.description} placeholder="What it allows" />
+        <SelectField label="Group" name="area" value={values.area} onChange={handleChange} error={errors.area}>
+          {areas.map((area) => (
+            <option key={area} value={area}>
+              {area}
+            </option>
+          ))}
+          {!areas.includes('Custom') && <option value="Custom">Custom</option>}
+        </SelectField>
       </form>
     </Modal>
   )
@@ -441,7 +492,7 @@ export function CompanyFormModal({ company, onClose, onSaved }) {
             <h3 className="form-section section-gap">Company login</h3>
             <p className="field-hint">
               The company signs in with this login (shown as {values.name.trim() || 'the company’s name'}). It opens the company dashboard, lists
-              the services it offers, records EUCL visits and adds receptionists.
+              the services it offers, records the services EUCL employees use and adds receptionists.
             </p>
             <div className="form-grid">
               <Field
@@ -491,7 +542,8 @@ export function CompanyFormModal({ company, onClose, onSaved }) {
 
 // companyId: the company that offers the service (the server uses the
 // boss's own company anyway; the super admin needs to say which one)
-export function ServiceFormModal({ service, companyId, onClose, onSaved }) {
+// priceOnly: staff who may only change the price (e.g. a receptionist)
+export function ServiceFormModal({ service, companyId, priceOnly = false, onClose, onSaved }) {
   const editing = Boolean(service)
   const form = useForm({
     name: service?.name ?? '',
@@ -502,25 +554,31 @@ export function ServiceFormModal({ service, companyId, onClose, onSaved }) {
 
   const save = form.submit(async (formValues) => {
     const { data } = editing
-      ? await api.patch(`/services/${service.id}/`, formValues)
+      ? await api.patch(`/services/${service.id}/`, priceOnly ? { price: formValues.price } : formValues)
       : await api.post('/services/', { ...formValues, company: Number(companyId) })
     onSaved(data, !editing)
   })
 
   return (
     <Modal
-      title={editing ? `Edit ${service.name}` : 'Add a service'}
-      subtitle="The company’s own price. EUCL sets the amount it pays when it covers the service."
+      title={editing ? (priceOnly ? `Change the price of ${service.name}` : `Edit ${service.name}`) : 'Add a service'}
+      subtitle={
+        priceOnly
+          ? 'EUCL pays this price when it covers the service. The change is recorded with your name.'
+          : 'The company’s own price. EUCL pays this price when it covers the service.'
+      }
       onClose={onClose}
       footer={<FormFooter onClose={onClose} submitting={form.submitting} label={editing ? 'Save' : 'Add service'} formId="service-form" />}
     >
       <form id="service-form" onSubmit={save}>
         <Alert>{errors._general}</Alert>
         <div className="form-grid">
-          <Field label="Service name" name="name" value={values.name} onChange={handleChange} error={errors.name} placeholder="e.g. Yoga class" maxLength={100} required />
-          <Field label="Company price per visit (RWF)" name="price" type="number" min="0" step="1" value={values.price} onChange={handleChange} error={errors.price} required />
+          <Field label="Service name" name="name" value={values.name} onChange={handleChange} error={errors.name} placeholder="e.g. Yoga class" maxLength={100} required disabled={priceOnly} />
+          <Field label="Price (RWF)" name="price" type="number" min="0" step="1" value={values.price} onChange={handleChange} error={errors.price} required autoFocus={priceOnly} />
         </div>
-        <TextAreaField label="Description" name="description" value={values.description} onChange={handleChange} error={errors.description} placeholder="e.g. 60 minutes, towels provided" />
+        {!priceOnly && (
+          <TextAreaField label="Description" name="description" value={values.description} onChange={handleChange} error={errors.description} placeholder="e.g. 60 minutes, towels provided" />
+        )}
       </form>
     </Modal>
   )
@@ -554,7 +612,7 @@ export function PaymentFormModal({ companies, defaultCompanyId, onClose, onSaved
   return (
     <Modal
       title="Mark as paid"
-      subtitle="Every unpaid visit of the company in this period is marked as paid by this payment."
+      subtitle="Every unpaid service used at the company in this period is marked as paid by this payment."
       onClose={onClose}
       footer={<FormFooter onClose={onClose} submitting={form.submitting} label="Mark as paid" formId="payment-form" disabled={!owed || Number(owed.unpaid) === 0} />}
     >

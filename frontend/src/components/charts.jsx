@@ -12,7 +12,7 @@ export function DailyChart({ days }) {
   if (total === 0) {
     return (
       <EmptyState icon="activity" title="No check-ins in the last 14 days">
-        Visits will appear here as the reception records them.
+        Services will appear here as the reception records them.
       </EmptyState>
     )
   }
@@ -69,7 +69,7 @@ export function ServiceBreakdown({ rows }) {
   const max = Math.max(1, ...rows.map((row) => row.count))
 
   if (total === 0) {
-    return <EmptyState icon="sparkles" title="No visits yet" />
+    return <EmptyState icon="sparkles" title="No services used yet" />
   }
 
   return (

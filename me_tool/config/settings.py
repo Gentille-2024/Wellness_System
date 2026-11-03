@@ -15,6 +15,24 @@ from celery.schedules import crontab
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _load_local_env(path):
+    """
+    Running on this computer without Docker: read KEY=VALUE lines from
+    me_tool/.env.local (Docker uses .env instead, and never sees this file).
+    Real environment variables win.
+    """
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+
+
+_load_local_env(BASE_DIR / ".env.local")
+
+
 def env(name, default=None):
     return os.environ.get(name, default)
 
@@ -136,7 +154,7 @@ STORAGES = {
 # The wellness system's API (in Docker: http://host.docker.internal:8000)
 WELLNESS_API_URL = env("WELLNESS_API_URL", "http://127.0.0.1:8000").rstrip("/")
 WELLNESS_API_TIMEOUT = int(env("WELLNESS_API_TIMEOUT", "20"))
-# The service account (role "M&E sync service" in the wellness system)
+# The service account (role "M&E officer" in the wellness system: it has "Export data for M&E")
 WELLNESS_SYNC_USERNAME = env("WELLNESS_SYNC_USERNAME", "")
 WELLNESS_SYNC_PASSWORD = env("WELLNESS_SYNC_PASSWORD", "")
 

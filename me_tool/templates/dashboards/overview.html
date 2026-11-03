@@ -30,7 +30,7 @@
   <div class="kpi">
     <div class="kpi-label">Amount spent</div>
     <div class="kpi-value" title="{{ kpis.spend|rwf }}">{{ kpis.spend|rwf }}</div>
-    <div class="kpi-foot">{{ kpis.spend_change|change }} · {{ kpis.cost_per_visit|rwf }} per visit</div>
+    <div class="kpi-foot">{{ kpis.spend_change|change }} · {{ kpis.cost_per_visit|rwf }} per service</div>
   </div>
   <div class="kpi">
     <div class="kpi-label">EUCL still owes</div>
@@ -62,7 +62,7 @@
       <div class="card-body"><div class="chart-box short"><canvas data-chart="company-chart" aria-label="Amount per company"></canvas></div></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Company</th><th class="num">Visits</th><th class="num">Employees</th><th class="num">Amount</th><th class="num">Owed</th></tr></thead>
+          <thead><tr><th>Company</th><th class="num">Services</th><th class="num">Employees</th><th class="num">Amount</th><th class="num">Owed</th></tr></thead>
           <tbody>
           {% for c in companies %}
             <tr>
@@ -136,11 +136,11 @@
     {% if top_employees %}
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Employee</th><th class="num">Visits</th><th class="num">Days</th><th class="num">Amount</th></tr></thead>
+          <thead><tr><th>Employee</th><th class="num">Services</th><th class="num">Days</th><th class="num">Amount</th></tr></thead>
           <tbody>
           {% for e in top_employees %}
             <tr>
-              <td>{{ e.employee__first_name }} {{ e.employee__last_name }}<span class="sub">{{ e.employee__code }} · {{ e.employee__department }}</span></td>
+              <td>{{ e.employee__last_name }} {{ e.employee__first_name }}<span class="sub">{{ e.employee__code }} · {{ e.employee__department }}</span></td>
               <td class="num">{{ e.visits }}</td>
               <td class="num">{{ e.days }}</td>
               <td class="num">{{ e.spend|rwf }}</td>

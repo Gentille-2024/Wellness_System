@@ -46,7 +46,7 @@ export default function EmployeeHomePage() {
       </div>
 
       <div className="grid-1-2">
-        <Card title="How a visit works">
+        <Card title="How it works">
           {today.length > 0 && (
             <Alert type="success">
               Today you’re at {today[0].company_name}. You can use more of its services today, but not another company’s.
@@ -62,11 +62,11 @@ export default function EmployeeHomePage() {
         </Card>
 
         <Card
-          title="Latest visits"
+          title="Latest services"
           flush
           actions={
             <Link to="/my-wellness/visits" className="btn btn-ghost btn-sm">
-              All my visits
+              All my services
             </Link>
           }
         >
@@ -92,7 +92,7 @@ export default function EmployeeHomePage() {
               </table>
             </div>
           ) : (
-            <EmptyState icon="clock" title="No visits yet">
+            <EmptyState icon="clock" title="No services used yet">
               Choose a place under “Places & services” and give reception your employee ID.
             </EmptyState>
           )}

@@ -5,6 +5,7 @@ from .models import (
     Employee,
     Payment,
     Permission,
+    PriceChange,
     Role,
     Service,
     UserProfile,
@@ -19,3 +20,4 @@ admin.site.register(Service)
 admin.site.register(Employee)
 admin.site.register(Visit)
 admin.site.register(Payment)
+admin.site.register(PriceChange)

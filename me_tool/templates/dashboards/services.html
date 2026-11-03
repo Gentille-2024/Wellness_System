@@ -25,12 +25,12 @@
 <div class="kpis">
   <div class="kpi"><div class="kpi-label">Services used</div><div class="kpi-value">{{ totals.visits|intcomma }}</div></div>
   <div class="kpi"><div class="kpi-label">Amount</div><div class="kpi-value">{{ totals.spend|rwf }}</div></div>
-  <div class="kpi"><div class="kpi-label">Services with visits</div><div class="kpi-value">{{ totals.services }}</div></div>
+  <div class="kpi"><div class="kpi-label">Services used at least once</div><div class="kpi-value">{{ totals.services }}</div></div>
 </div>
 
 {% if rows %}
 <div class="card">
-  <div class="card-head"><div><h2>Top 10 services</h2><p>Visits this {{ month.unit }} and the previous {{ month.unit }}</p></div></div>
+  <div class="card-head"><div><h2>Top 10 services</h2><p>Services used this {{ month.unit }} and the previous {{ month.unit }}</p></div></div>
   <div class="card-body"><div class="chart-box tall"><canvas data-chart="services-chart"></canvas></div></div>
 </div>
 {% endif %}
@@ -40,7 +40,7 @@
     <table>
       <thead>
         <tr><th>Service</th>{% if not company_id and access.sees_all %}<th>Company</th>{% endif %}<th>EUCL covers</th>
-          <th class="num">Visits</th><th class="num">Previous {{ month.unit }}</th><th class="num">Change</th><th class="num">Employees</th><th class="num">Amount</th><th>Share</th></tr>
+          <th class="num">Services</th><th class="num">Previous {{ month.unit }}</th><th class="num">Change</th><th class="num">Employees</th><th class="num">Amount</th><th>Share</th></tr>
       </thead>
       <tbody>
       {% for s in rows %}

@@ -4,6 +4,7 @@ import { useAuth } from '../auth/AuthContext'
 import { navFor } from '../navigation'
 import Brand from './Brand'
 import Icon from './Icon'
+import ThemeToggle from './ThemeToggle'
 import { Avatar } from './ui'
 
 // The frame around every page after login: sidebar menu + top bar + page
@@ -28,7 +29,15 @@ export default function AppLayout() {
           {sections.map((section) => (
             <div key={section.section} className="nav-section">
               <div className="nav-section-title">{section.section}</div>
-              {section.items.map((item) => (
+              {section.items.map((item) =>
+                item.href ? (
+                  // Another website (the M&E tool): opens in a new tab
+                  <a key={item.href} href={item.href} target="_blank" rel="noreferrer" className="nav-link">
+                    <Icon name={item.icon} />
+                    {item.label}
+                    <span className="nav-external" aria-hidden="true">↗</span>
+                  </a>
+                ) : (
                 <NavLink
                   key={item.to}
                   to={item.to}
@@ -39,7 +48,8 @@ export default function AppLayout() {
                   <Icon name={item.icon} />
                   {item.label}
                 </NavLink>
-              ))}
+                ),
+              )}
             </div>
           ))}
         </nav>
@@ -72,6 +82,7 @@ export default function AppLayout() {
             {user.company?.name ?? 'EUCL Wellness Management System'}
           </div>
           <div className="topbar-date">{today}</div>
+          <ThemeToggle />
         </header>
 
         <main className="page">

@@ -120,11 +120,11 @@ CALCULATIONS = {
 
 CALCULATION_CHOICES = [
     ("participation_rate", "Participation rate (% of active employees who used a service)"),
-    ("total_visits", "Services used (visits)"),
+    ("total_visits", "Services used"),
     ("unique_participants", "Employees who used a service"),
-    ("visits_per_participant", "Visits per participating employee"),
+    ("visits_per_participant", "Services per participating employee"),
     ("total_spend", "Amount spent (RWF)"),
-    ("cost_per_visit", "Cost per visit (RWF)"),
+    ("cost_per_visit", "Cost per service (RWF)"),
     ("cost_per_participant", "Cost per participating employee (RWF)"),
     ("repeat_rate", "Repeat use (% of last month's participants who came again)"),
     ("service_coverage", "Service coverage (% of offered services covered by EUCL)"),

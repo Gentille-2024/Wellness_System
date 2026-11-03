@@ -1,4 +1,5 @@
-/* EUCL Wellness M&E — one stylesheet, light and dark (follows the system) */
+/* EUCL Wellness M&E — one stylesheet, light and dark.
+   Dark tokens apply on <html data-theme="dark"> (set by static/js/theme.js). */
 
 :root {
   --bg: #f4f6f5;
@@ -31,35 +32,63 @@
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0d1411;
-    --surface: #141c18;
-    --surface-2: #18221d;
-    --border: #25302a;
-    --border-strong: #33413a;
-    --text: #e6ece9;
-    --muted: #93a39b;
-    --primary: #3bb27f;
-    --primary-ink: #6fd1a6;
-    --primary-soft: rgba(59, 178, 127, 0.14);
-    --success: #5cc99a;
-    --success-bg: rgba(92, 201, 154, 0.14);
-    --warning: #f3bd62;
-    --warning-bg: rgba(245, 166, 35, 0.14);
-    --danger: #f07a72;
-    --danger-bg: rgba(240, 82, 72, 0.15);
-    --info: #7db4ec;
-    --info-bg: rgba(90, 160, 230, 0.14);
-    --chart-1: #3bb27f;
-    --chart-2: #6aa8e6;
-    --chart-3: #e5a84a;
-    --chart-4: #a98be0;
-    --chart-5: #e57b74;
-    --chart-grid: #222c27;
-    --shadow: none;
-    color-scheme: dark;
-  }
+:root[data-theme='dark'] {
+  --bg: #0d1411;
+  --surface: #141c18;
+  --surface-2: #18221d;
+  --border: #25302a;
+  --border-strong: #33413a;
+  --text: #e6ece9;
+  --muted: #93a39b;
+  --primary: #3bb27f;
+  --primary-ink: #6fd1a6;
+  --primary-soft: rgba(59, 178, 127, 0.14);
+  --success: #5cc99a;
+  --success-bg: rgba(92, 201, 154, 0.14);
+  --warning: #f3bd62;
+  --warning-bg: rgba(245, 166, 35, 0.14);
+  --danger: #f07a72;
+  --danger-bg: rgba(240, 82, 72, 0.15);
+  --info: #7db4ec;
+  --info-bg: rgba(90, 160, 230, 0.14);
+  --chart-1: #3bb27f;
+  --chart-2: #6aa8e6;
+  --chart-3: #e5a84a;
+  --chart-4: #a98be0;
+  --chart-5: #e57b74;
+  --chart-grid: #222c27;
+  --shadow: none;
+  color-scheme: dark;
+}
+
+:root[data-theme='ocean'] {
+  /* Ocean: deep navy with sky-blue accents (a calm dark theme) */
+  --bg: #0a1322;
+  --surface: #101c31;
+  --surface-2: #14223b;
+  --border: #21314d;
+  --border-strong: #2d4064;
+  --text: #e5edfa;
+  --muted: #8f9fbd;
+  --primary: #2f7fd0;
+  --primary-ink: #8cc4ff;
+  --primary-soft: rgba(56, 152, 236, 0.16);
+  --success: #5eead4;
+  --success-bg: rgba(45, 212, 191, 0.14);
+  --warning: #fcd34d;
+  --warning-bg: rgba(251, 191, 36, 0.14);
+  --danger: #fca5a5;
+  --danger-bg: rgba(248, 113, 113, 0.15);
+  --info: #a5b4fc;
+  --info-bg: rgba(129, 140, 248, 0.16);
+  --chart-1: #4aa3f0;
+  --chart-2: #2dd4bf;
+  --chart-3: #fbbf24;
+  --chart-4: #a78bfa;
+  --chart-5: #f87171;
+  --chart-grid: #1c2b45;
+  --shadow: none;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -298,3 +327,46 @@ label { display: grid; gap: 4px; font-size: 13px; font-weight: 600; color: var(-
 /* System resources: check statuses */
 .badge.warn { background: var(--warning-bg); color: var(--warning); }
 .badge.fail { background: var(--danger-bg); color: var(--danger); }
+
+/* ---- Light / dark switch (sun & moon) ---------------------------------- */
+.logo-dark { display: none; }
+:root[data-theme='dark'] .logo-light, :root[data-theme='ocean'] .logo-light { display: none; }
+:root[data-theme='dark'] .logo-dark, :root[data-theme='ocean'] .logo-dark { display: block; }
+
+/* Theme switch: light (sun), dark (moon), ocean (wave) */
+.theme-switch { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); }
+.theme-option { display: inline-grid; place-items: center; width: 32px; height: 30px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; }
+.theme-option:hover { color: var(--text); }
+.theme-option.active { background: var(--primary-soft); color: var(--primary-ink); }
+.theme-option:focus-visible { outline: 3px solid var(--primary-soft); outline-offset: 1px; }
+.theme-option svg { width: 16px; height: 16px; }
+/* The switch sits at the top right of every page */
+.main-top {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 16px;
+  height: 60px; margin: -28px -32px 24px; padding: 0 32px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.main-top-title { font-weight: 600; color: var(--muted); }
+.main-top-date { margin-left: auto; color: var(--muted); font-size: 14px; }
+.login-theme { position: fixed; top: 16px; right: 16px; }
+@media (max-width: 900px) {
+  .main-top { height: 52px; margin: -18px -16px 18px; padding: 0 16px; }
+  .main-top-date { display: none; }
+  .main-top .theme-switch { margin-left: auto; }
+}
+
+/* Password with an eye button to show what was typed */
+.password-field { position: relative; display: block; margin-top: 4px; }
+.password-field input { padding-right: 44px; }
+.password-toggle {
+  position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+  display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0;
+  border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer;
+}
+.password-toggle:hover { color: var(--text); background: var(--surface-2); }
+.password-toggle:focus-visible { outline: 3px solid var(--primary-soft); }
+.password-toggle svg { width: 18px; height: 18px; }
+.password-toggle .icon-eye-off { display: none; }
+.password-toggle[aria-pressed="true"] .icon-eye { display: none; }
+.password-toggle[aria-pressed="true"] .icon-eye-off { display: block; }

@@ -16,11 +16,18 @@ under **Users & roles → Roles & permissions**.
 
 | Built-in role | Belongs to | Can do |
 |---|---|---|
-| Super admin | EUCL | Everything |
-| EUCL HR | EUCL | Onboard and manage EUCL employees; see all visits |
-| Company boss | A company | Services & prices, staff logins, visits and payments of their company |
-| Company receptionist | A company | Record (tick) the services an employee used; see the company's visits |
-| Employee | EUCL | See partner places and services, see and export own visits |
+| Super admin | EUCL | Everything, including permissions added later |
+| Company boss | A company | Every company page: dashboard, record services, attendance, services & prices, employees attended, services, payments and staff |
+| Receptionist | A company | Dashboard, record services, employees attendance, services & prices, employees attended |
+| HR | EUCL | What an employee can do, plus EUCL employees: onboard, Excel template and upload. Given automatically to employees of the HR department |
+| Employee (automatic) | EUCL | See partner places and services, see and export own services |
+| M&E officer | EUCL | M&E dashboards, targets, and exporting the data (the M&E tool's sync account has this role) |
+
+Employee IDs are typed by HR (no automatic numbering). The username is the employee's last (family) name
+(NATUKUNDA, or NATUKUNDA2 if taken), and names are shown family name first: NATUKUNDA Charlotte. New employees have no password: on the sign-in page they click
+**First time here? Create your account**, type their Employee ID and the email or phone HR saved,
+and choose their password. The Excel template columns are EmpID, Last name, First name, Email,
+Phone, Department, Position (Email or Phone required).
 
 Companies can be **deactivated** (paused: hidden from employees, no new visits) or
 **deleted** (archived: staff can't log in). Nothing is ever erased and both can be undone.
@@ -31,7 +38,7 @@ Companies can be **deactivated** (paused: hidden from employees, no new visits) 
 ```powershell
 python -m venv venv
 venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements.txt   # includes openpyxl for the Excel upload
 copy .env.example .env      # then fill in DJANGO_SECRET_KEY and DB_PASSWORD
 python manage.py migrate
 python manage.py createsuperuser
@@ -50,8 +57,8 @@ Open http://localhost:5173
 1. Log in as the super admin.
 2. **Companies → Add company**, open it, add its **services & prices**, then add a
    **Company boss** and a **Company receptionist** under *Staff*.
-3. **Users & roles → Add user** with the **EUCL HR** role.
-4. HR onboards EUCL employees under **EUCL employees**.
+3. Onboard the first HR employee under **EUCL employees** with department **HR**: they get the **HR** role.
+4. HR adds the other employees one by one, or downloads the **Excel template** and uploads it.
 
 ## Tests
 ```powershell

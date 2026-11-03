@@ -7,7 +7,8 @@ import ServicesManager from '../components/ServicesManager'
 import { Alert, Avatar, Badge, Card, EmptyState, Loading, PageHeader, StatCard } from '../components/ui'
 import useApi from '../hooks/useApi'
 import useCompanyActions from '../hooks/useCompanyActions'
-import { formatDate, formatMoney } from '../utils/format'
+import { formatDate, formatMoney, formatMonth, formatTime, monthStartISO, todayISO } from '../utils/format'
+import { visitsByEmployeeDay } from '../utils/statement'
 
 // Super admin: one service provider — details, services & prices, staff, money
 export default function CompanyDetailPage() {
@@ -15,6 +16,8 @@ export default function CompanyDetailPage() {
   const company = useApi(`/companies/${companyId}/`)
   const staff = useApi('/users/', { company: companyId })
   const balance = useApi('/payments/balances/', { company: companyId })
+  // Who came this month (the full history, by month, is on the activity page)
+  const thisMonth = useApi('/visits/', { company: companyId, date_from: monthStartISO(), date_to: todayISO() })
 
   const location = useLocation()
   const [notice, setNotice] = useState(location.state?.notice ?? '')
@@ -50,6 +53,9 @@ export default function CompanyDetailPage() {
             </button>
           ) : (
             <>
+              <Link to={`/eucl/activity/${info.id}`} className="btn btn-secondary">
+                <Icon name="users" size={16} /> Employees who came
+              </Link>
               <button type="button" className="btn btn-secondary" onClick={() => setEditingCompany(true)}>
                 <Icon name="edit" size={16} /> Edit
               </button>
@@ -68,7 +74,7 @@ export default function CompanyDetailPage() {
 
       <div className="stat-grid">
         <StatCard label="Status" value={<CompanyStatus company={info} />} icon="building" />
-        <StatCard label="Visits" value={money.visits} hint="All time" icon="activity" tone="info" />
+        <StatCard label="Services used" value={money.visits} hint="All time" icon="activity" tone="info" />
         <StatCard label="Unpaid" value={formatMoney(money.unpaid)} icon="card" tone="danger" />
         <StatCard label="Paid" value={formatMoney(money.paid)} icon="money" tone="success" />
       </div>
@@ -96,7 +102,7 @@ export default function CompanyDetailPage() {
             {staff.data?.length ? (
               <ul className="list">
                 {staff.data.map((member) => {
-                  const name = `${member.first_name} ${member.last_name}`.trim() || member.username
+                  const name = `${member.last_name} ${member.first_name}`.trim() || member.username
                   return (
                     <li key={member.id}>
                       <div className="cell-person">
@@ -125,6 +131,54 @@ export default function CompanyDetailPage() {
             )}
           </Card>
       </div>
+
+      <Card
+        title="Who came this month"
+        subtitle={`EUCL employees who used services here · ${formatMonth(todayISO().slice(0, 7))}`}
+        flush
+        actions={
+          <Link to={`/eucl/activity/${info.id}`} className="btn btn-ghost btn-sm">
+            Other months & export
+          </Link>
+        }
+      >
+        {thisMonth.loading ? (
+          <Loading />
+        ) : thisMonth.data?.length ? (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Time</th>
+                  <th>Employee</th>
+                  <th>Services</th>
+                  <th className="num">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visitsByEmployeeDay(thisMonth.data).map((line) => (
+                  <tr key={line.key}>
+                    <td className="nowrap">{formatDate(line.date)}</td>
+                    <td>{formatTime(line.time)}</td>
+                    <td>
+                      <div className="cell-main">{line.name}</div>
+                      <div className="cell-sub">
+                        {line.code}
+                        {line.department ? ` · ${line.department}` : ''}
+                      </div>
+                    </td>
+                    <td>{line.services.join(', ')}</td>
+                    <td className="num">{formatMoney(line.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState icon="users" title="Nobody has used services here this month" />
+        )}
+      </Card>
 
       <ServicesManager companyId={companyId} canEdit={!info.is_deleted} canAdd={false} canChoose={!info.is_deleted} onNotice={setNotice} />
 

@@ -14,6 +14,8 @@ from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from .models import (
+    PriceChange,
+    display_name,
     Company,
     Employee,
     Payment,
@@ -23,7 +25,7 @@ from .models import (
     UserProfile,
     Visit,
 )
-from .permissions import COMPANY_DEACTIVATED, COMPANY_ROLE_PERMISSIONS, company_deactivated, get_company, get_permissions, has_perm
+from .permissions import COMPANY_DEACTIVATED, company_deactivated, company_role_permissions, get_company, get_permissions, has_perm
 
 
 # ---------------------------------------------------------------- helpers
@@ -47,7 +49,24 @@ def check_unique_username(value, exclude_user=None):
     return value
 
 
+def clean_employee_id(value, exclude=None):
+    """HR types the Employee ID: trimmed, upper case, unique, also free as a username."""
+    value = "".join(str(value).split()).upper()
+    if not value:
+        raise serializers.ValidationError("Enter the Employee ID.")
+    if len(value) > 20:
+        raise serializers.ValidationError("The Employee ID can have at most 20 characters.")
+    taken = Employee.objects.filter(employee_id__iexact=value)
+    if exclude is not None:
+        taken = taken.exclude(pk=exclude.pk)
+    if taken.exists():
+        raise serializers.ValidationError(f"Employee ID {value} is already used.")
+    return value
+
+
 def check_unique_email(value, exclude_user=None):
+    if not value:
+        return value  # email is optional for employees
     users = User.objects.filter(email__iexact=value)
     if exclude_user is not None:
         users = users.exclude(pk=exclude_user.pk)
@@ -70,18 +89,48 @@ def check_new_password(password, confirm, user=None):
 
 def role_names(user):
     profile = getattr(user, "userprofile", None)
-    names = ["Super admin"] if user.is_superuser else []
-    if profile is not None:
-        names += [role.name for role in profile.roles.all()]
+    names = [role.name for role in profile.roles.all()] if profile is not None else []
+    if user.is_superuser and not any(code == Role.SUPER_ADMIN for code in (profile.roles.values_list("code", flat=True) if profile else [])):
+        names.insert(0, "Super admin")
     return names
 
 
 # -------------------------------------------------------- roles & permissions
 
 class PermissionSerializer(serializers.ModelSerializer):
+    """Permissions. The super admin can add new ones (name, description, area)."""
+
     class Meta:
         model = Permission
-        fields = ["id", "code", "name", "description", "area"]
+        fields = ["id", "code", "name", "description", "area", "is_builtin"]
+        read_only_fields = ["code", "is_builtin"]
+
+    def validate_name(self, value):
+        value = " ".join(value.split())
+        taken = Permission.objects.filter(name__iexact=value)
+        if self.instance is not None:
+            taken = taken.exclude(pk=self.instance.pk)
+        if taken.exists():
+            raise serializers.ValidationError("A permission with this name already exists.")
+        return value
+
+    def validate_area(self, value):
+        value = " ".join(value.split()).title() if value else "Custom"
+        return value[:20]
+
+    @transaction.atomic
+    def create(self, validated_data):
+        # A stable code from the name: "Approve refunds" -> "approve_refunds"
+        base = (slugify(validated_data["name"]).replace("-", "_") or "permission")[:44]
+        code, number = base, 2
+        while Permission.objects.filter(code=code).exists():
+            code, number = f"{base}_{number}", number + 1
+        permission = Permission.objects.create(code=code, is_builtin=False, **validated_data)
+        # The super admin role always has every permission
+        super_admin = Role.objects.filter(code=Role.SUPER_ADMIN).first()
+        if super_admin is not None:
+            super_admin.permissions.add(permission)
+        return permission
 
 
 class RoleSerializer(serializers.ModelSerializer):
@@ -140,15 +189,21 @@ class RoleSerializer(serializers.ModelSerializer):
         return value
 
     def validate_permissions(self, value):
-        if not value:
+        # EUCL may make an empty role and switch its permissions on afterwards
+        if not value and not self._is_admin():
             raise serializers.ValidationError("Choose at least one permission.")
         if not self._is_admin():
-            not_allowed = [p.name for p in value if p.code not in COMPANY_ROLE_PERMISSIONS]
+            allowed = company_role_permissions()
+            not_allowed = [p.name for p in value if p.code not in allowed]
             if not_allowed:
                 raise serializers.ValidationError(f"You can't give: {', '.join(not_allowed)}.")
         return value
 
     def validate(self, attrs):
+        if self.instance is not None and self.instance.code == Role.SUPER_ADMIN:
+            # Never a company role. Every permission, "Manage users & roles"
+            # included, may be switched off (the app asks first for that one).
+            attrs.pop("is_company_role", None)
         if self.instance is not None and self.instance.code == Role.EMPLOYEE:
             if attrs.get("is_company_role"):
                 raise serializers.ValidationError("The Employee role can't be a company role.")
@@ -168,7 +223,30 @@ class RoleSerializer(serializers.ModelSerializer):
         while Role.objects.filter(code=code).exists():
             code, number = f"{base}_{number}", number + 1
         validated_data["code"] = code
-        return super().create(validated_data)
+        return self._set_kind(super().create(validated_data))
+
+    def update(self, instance, validated_data):
+        return self._set_kind(super().update(instance, validated_data))
+
+    @staticmethod
+    def _set_kind(role):
+        """
+        Nobody ticks "company role" any more: a role whose permissions are all
+        company permissions is a company role (its users must work for a
+        company). Employee and Super admin never are; a company's own roles
+        always are.
+        """
+        if role.code in (Role.EMPLOYEE, Role.SUPER_ADMIN):
+            kind = False
+        elif role.company_id is not None:
+            kind = True
+        else:
+            areas = set(role.permissions.values_list("area", flat=True))
+            kind = bool(areas) and areas == {"Company"}
+        if role.is_company_role != kind:
+            role.is_company_role = kind
+            role.save(update_fields=["is_company_role"])
+        return role
 
 
 # ------------------------------------------------------------- companies
@@ -280,7 +358,8 @@ class ServiceSerializer(serializers.ModelSerializer):
             "eucl_price",
             "visit_count",
         ]
-        extra_kwargs = {"company": {"required": False}}
+        # eucl_price always equals the company's price (set in validate)
+        extra_kwargs = {"company": {"required": False}, "eucl_price": {"read_only": True}}
         # Our validate() gives a clearer duplicate-name message
         validators = []
 
@@ -319,12 +398,44 @@ class ServiceSerializer(serializers.ModelSerializer):
         if duplicates.exists():
             raise serializers.ValidationError({"name": f"{company.name} already offers a service with this name."})
 
-        # A covered service needs the amount EUCL agreed to pay
+        # EUCL pays the company's own price: eucl_price simply mirrors it
+        # (kept because the M&E tool still reads it)
         covered = attrs.get("is_approved", getattr(self.instance, "is_approved", False))
-        amount = attrs.get("eucl_price", getattr(self.instance, "eucl_price", None))
-        if covered and amount is None:
-            raise serializers.ValidationError({"eucl_price": "Set the amount EUCL pays per visit."})
+        price = attrs.get("price", getattr(self.instance, "price", None))
+        attrs["eucl_price"] = price if covered else None
         return attrs
+
+
+class PriceChangeSerializer(serializers.ModelSerializer):
+    service_name = serializers.CharField(source="service.name", read_only=True)
+    company_name = serializers.CharField(source="company.name", read_only=True)
+    difference = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PriceChange
+        fields = [
+            "id", "service", "service_name", "company", "company_name", "old_price", "new_price", "difference",
+            "changed_by_name", "changed_by_username", "changed_by_roles", "changed_at",
+        ]
+
+    def get_difference(self, change):
+        return None if change.old_price is None else change.new_price - change.old_price
+
+
+def record_price_change(service, old_price, user):
+    """Note who gave this service its price (old_price None: just added)."""
+    if old_price is not None and old_price == service.price:
+        return None
+    return PriceChange.objects.create(
+        service=service,
+        company=service.company,
+        old_price=old_price,
+        new_price=service.price,
+        changed_by=user,
+        changed_by_name=display_name(user) or user.username,
+        changed_by_username=user.username,
+        changed_by_roles=", ".join(role_names(user)),
+    )
 
 
 class PublicCompanySerializer(serializers.ModelSerializer):
@@ -368,7 +479,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
     last_name = serializers.CharField(source="user.last_name", max_length=150)
     email = serializers.EmailField(source="user.email")
     username = serializers.CharField(source="user.username", read_only=True)
-    user_name = serializers.CharField(source="user.get_full_name", read_only=True)
+    user_name = serializers.CharField(source="name", read_only=True)
     is_active = serializers.BooleanField(source="user.is_active", read_only=True)
     # For company staff: already used services at another company today
     elsewhere_today = serializers.BooleanField(read_only=True, default=False)
@@ -390,13 +501,15 @@ class EmployeeSerializer(serializers.ModelSerializer):
             "position",
             "created_at",
         ]
-        read_only_fields = ["employee_id"]
         extra_kwargs = {
-            # "Full credentials": these can't be left empty
+            "employee_id": {"validators": []},  # clean_employee_id gives a clearer message
             "phone": {"allow_blank": False},
             "department": {"allow_blank": False},
             "position": {"allow_blank": False},
         }
+
+    def validate_employee_id(self, value):
+        return clean_employee_id(value, exclude=self.instance)
 
     def validate_phone(self, value):
         return validate_phone(value)
@@ -411,24 +524,70 @@ class EmployeeSerializer(serializers.ModelSerializer):
         for field, value in validated_data.pop("user", {}).items():
             setattr(instance.user, field, value)
         instance.user.save()
-        return super().update(instance, validated_data)
+        employee = super().update(instance, validated_data)
+        employee.sync_hr_role()  # moving in or out of HR changes the role
+        return employee
+
+
+def username_from_last_name(last_name, taken=()):
+    """
+    The default username: the last (family) name ("NATUKUNDA"). If that name is
+    already used, a number is added: NATUKUNDA2, NATUKUNDA3...
+    `taken`: names already chosen in the same upload.
+    """
+    base = re.sub(r"[^\w.@+-]", "", last_name.strip())[:140] or "employee"
+    taken = {name.lower() for name in taken}
+    name, number = base, 2
+    while name.lower() in taken or User.objects.filter(username__iexact=name).exists():
+        name, number = f"{base}{number}", number + 1
+    return name
+
+
+def create_employee(employee_id, first_name, last_name, department, position,
+                    username=None, password=None, email="", phone=""):
+    """
+    The login, the Employee role (plus HR for the HR department) and the
+    Employee record. The username defaults to the last name. Without a
+    password the account has none yet: the employee creates it at first login
+    (Employee ID + the email or phone HR saved).
+    """
+    user = User.objects.create_user(
+        username=username or username_from_last_name(last_name),
+        password=password or None,  # None -> no usable password until first login
+        first_name=first_name,
+        last_name=last_name,
+        email=email or "",
+    )
+    profile = UserProfile.objects.create(user=user)
+    profile.roles.add(Role.objects.get(code=Role.EMPLOYEE))
+    employee = Employee.objects.create(
+        user=user, employee_id=employee_id, phone=phone or "", department=department, position=position
+    )
+    employee.sync_hr_role()
+    return employee
 
 
 class EmployeeRegistrationSerializer(serializers.Serializer):
-    """Creates the login, the Employee role and the Employee record together."""
+    """
+    Creates the login, the Employee role and the Employee record together.
+    HR types the Employee ID. The username defaults to the last name. Without
+    a password the employee creates it at first login, using their Employee ID
+    and the email or phone saved here. Every field is required.
+    """
 
+    employee_id = serializers.CharField(max_length=40)
     first_name = serializers.CharField(max_length=150)
     last_name = serializers.CharField(max_length=150)
-    username = serializers.CharField(max_length=150)
+    username = serializers.CharField(max_length=150, required=False, allow_blank=True)
     email = serializers.EmailField()
-    password = serializers.CharField(write_only=True)
-    password_confirm = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    password_confirm = serializers.CharField(write_only=True, required=False, allow_blank=True)
     phone = serializers.CharField(max_length=20)
     department = serializers.CharField(max_length=100)
     position = serializers.CharField(max_length=100)
 
-    def validate_username(self, value):
-        return check_unique_username(value)
+    def validate_employee_id(self, value):
+        return clean_employee_id(value)
 
     def validate_email(self, value):
         return check_unique_email(value)
@@ -437,25 +596,30 @@ class EmployeeRegistrationSerializer(serializers.Serializer):
         return validate_phone(value)
 
     def validate(self, attrs):
-        check_new_password(attrs["password"], attrs["password_confirm"])
+        attrs["username"] = (attrs.get("username") or "").strip()
+        if attrs["username"]:
+            try:
+                check_unique_username(attrs["username"])
+            except serializers.ValidationError as exc:
+                raise serializers.ValidationError({"username": exc.detail})
+        else:
+            attrs["username"] = username_from_last_name(attrs["last_name"])
+        if attrs.get("password") or attrs.get("password_confirm"):
+            check_new_password(attrs.get("password", ""), attrs.get("password_confirm", ""))
         return attrs
 
     @transaction.atomic
     def create(self, validated_data):
-        user = User.objects.create_user(
+        return create_employee(
+            validated_data["employee_id"],
+            validated_data["first_name"],
+            validated_data["last_name"],
+            validated_data["department"],
+            validated_data["position"],
             username=validated_data["username"],
-            password=validated_data["password"],
-            first_name=validated_data["first_name"],
-            last_name=validated_data["last_name"],
-            email=validated_data["email"],
-        )
-        profile = UserProfile.objects.create(user=user)
-        profile.roles.add(Role.objects.get(code=Role.EMPLOYEE))
-        return Employee.objects.create(
-            user=user,
-            phone=validated_data["phone"],
-            department=validated_data["department"],
-            position=validated_data["position"],
+            password=validated_data.get("password"),
+            email=validated_data.get("email", ""),
+            phone=validated_data.get("phone", ""),
         )
 
 
@@ -463,12 +627,13 @@ class EmployeeRegistrationSerializer(serializers.Serializer):
 
 class VisitSerializer(serializers.ModelSerializer):
     employee_code = serializers.CharField(source="employee.employee_id", read_only=True)
-    employee_name = serializers.CharField(source="employee.user.get_full_name", read_only=True)
+    employee_name = serializers.CharField(source="employee.name", read_only=True)
     department = serializers.CharField(source="employee.department", read_only=True)
     service_name = serializers.CharField(source="service.name", read_only=True)
     company_name = serializers.CharField(source="company.name", read_only=True)
     recorded_by_name = serializers.CharField(source="recorded_by.username", read_only=True, allow_null=True)
     is_paid = serializers.SerializerMethodField()
+    feedback_kind_label = serializers.CharField(source="get_feedback_kind_display", read_only=True)
 
     class Meta:
         model = Visit
@@ -487,6 +652,10 @@ class VisitSerializer(serializers.ModelSerializer):
             "visited_at",
             "recorded_by_name",
             "is_paid",
+            "feedback_kind",
+            "feedback_kind_label",
+            "feedback_message",
+            "feedback_at",
         ]
         read_only_fields = fields
 
@@ -520,13 +689,11 @@ class RecordVisitsSerializer(serializers.Serializer):
             if not user.is_superuser and service.company != company:
                 raise serializers.ValidationError({"services": "You can only record services of your own company."})
             if not service.company.is_open:
-                raise serializers.ValidationError({"services": f"{service.company} is not open for visits."})
+                raise serializers.ValidationError({"services": f"{service.company} is not open right now."})
             if not service.is_active:
                 raise serializers.ValidationError({"services": f"{service.name} is currently not offered."})
             if not service.is_approved:
                 raise serializers.ValidationError({"services": f"{service.name} is not covered by EUCL."})
-            if service.eucl_price is None:
-                raise serializers.ValidationError({"services": f"EUCL hasn't set the amount for {service.name} yet."})
 
         # Several services a day are fine, but all at ONE company
         companies = {service.company_id for service in attrs["services"]}
@@ -538,7 +705,7 @@ class RecordVisitsSerializer(serializers.Serializer):
             .exists()
         )
         if went_elsewhere:
-            name = employee.user.get_full_name() or employee.employee_id
+            name = employee.name or employee.employee_id
             raise serializers.ValidationError({
                 "employee": f"{name} already used services at another company today. "
                             "An EUCL employee can visit only one company per day."
@@ -580,7 +747,7 @@ class PaymentSerializer(serializers.ModelSerializer):
 
 class UserAccountSerializer(serializers.ModelSerializer):
     """
-    Create and edit logins with one or more roles.
+    Create and edit logins. Every login has exactly one role.
     - Users with manage_users (the super admin) can give any role.
     - A company boss (manage_company_staff) can only give company roles,
       and only inside their own company.
@@ -657,26 +824,41 @@ class UserAccountSerializer(serializers.ModelSerializer):
         employee = getattr(self.instance, "employee", None) if self.instance else None
         profile = getattr(self.instance, "userprofile", None) if self.instance else None
 
-        # ---- the roles this user will end up with
+        # ---- the role this user will end up with: exactly one, because
+        # every role has its own permissions
+        super_role = Role.objects.filter(code=Role.SUPER_ADMIN).first()
         if "roles" in attrs:
             roles = set(attrs["roles"])
+            if attrs.get("is_superuser") and super_role is not None and not roles:
+                roles = {super_role}
+        elif attrs.get("is_superuser") and super_role is not None:
+            roles = {super_role}
         else:
             roles = set(profile.roles.all()) if profile else set()
+            if not roles and getattr(self.instance, "is_superuser", False) and super_role is not None:
+                roles = {super_role}  # a super admin made with createsuperuser
+        if not roles:
+            raise serializers.ValidationError({"roles": "Choose a role."})
+        if len(roles) > 1:
+            raise serializers.ValidationError(
+                {"roles": "Choose only one role. Each role has its own permissions, so a person can't have two."}
+            )
         employee_role = Role.objects.get(code=Role.EMPLOYEE)
         if employee_role in roles and employee is None:
             raise serializers.ValidationError(
-                {"roles": "The Employee role comes with onboarding on the EUCL employees page."}
+                {"roles": "The Employee role is only for EUCL employees: add them on the EUCL employees page."}
             )
-        if employee is not None:
-            roles.add(employee_role)  # employees always keep it
 
-        is_superuser = attrs.get("is_superuser", getattr(self.instance, "is_superuser", False))
-        if not roles and not is_superuser:
-            raise serializers.ValidationError({"roles": "Choose at least one role."})
+        # The Super admin role and the super admin switch always go together
+        is_superuser = super_role is not None and super_role in roles
+        if attrs.get("is_superuser") and not is_superuser:
+            raise serializers.ValidationError(
+                {"roles": "A super admin has the Super admin role only. Choose only one role."}
+            )
 
         # ---- a company boss works only inside their own company
         if not is_platform_admin:
-            if attrs.get("is_superuser") or any(not role.is_company_role for role in roles - {employee_role}):
+            if is_superuser or any(not role.is_company_role for role in roles):
                 raise serializers.ValidationError({"roles": "You can only give company roles."})
             attrs["company"] = get_company(request_user)
 
@@ -747,6 +929,68 @@ class UserAccountSerializer(serializers.ModelSerializer):
         instance = super().update(instance, validated_data)
         self.save_roles(instance, roles, company, is_superuser)
         return instance
+
+
+class FeedbackSerializer(serializers.Serializer):
+    """An employee's feedback on one service they used: a comment or a complaint."""
+
+    kind = serializers.ChoiceField(
+        choices=Visit.FEEDBACK_KINDS,
+        error_messages={"invalid_choice": "Choose Comment or Complaint."},
+    )
+    message = serializers.CharField(max_length=1000, required=False, allow_blank=True)  # checked in validate()
+
+    def validate(self, attrs):
+        attrs["message"] = attrs.get("message", "").strip()
+        if not attrs["message"]:
+            raise serializers.ValidationError({"message": "Write your comment or complaint."})
+        return attrs
+
+
+def same_phone(a, b):
+    """+250 788 123 456, 0788123456 and 250788123456 are the same number."""
+    digits_a, digits_b = re.sub(r"\D", "", a or ""), re.sub(r"\D", "", b or "")
+    return len(digits_a) >= 9 and len(digits_b) >= 9 and digits_a[-9:] == digits_b[-9:]
+
+
+class FirstLoginSerializer(serializers.Serializer):
+    """
+    An employee HR added creates their account: Employee ID + the email or
+    phone HR saved, then their own password. Only for accounts without a
+    password yet.
+    """
+
+    NO_MATCH = (
+        "These details don't match an employee waiting to create their account. "
+        "Check your Employee ID and the email or phone you gave HR. "
+        "If you already created your account, sign in instead."
+    )
+
+    employee_id = serializers.CharField(max_length=40)
+    contact = serializers.CharField(max_length=254)
+    password = serializers.CharField(write_only=True)
+    password_confirm = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        employee_id = "".join(attrs["employee_id"].split()).upper()
+        employee = Employee.objects.select_related("user").filter(employee_id__iexact=employee_id).first()
+        contact = attrs["contact"].strip()
+        matches = employee is not None and (
+            (employee.user.email and employee.user.email.lower() == contact.lower())
+            or same_phone(employee.phone, contact)
+        )
+        # One message for every failure: it doesn't reveal which IDs exist
+        if not matches or not employee.user.is_active or employee.user.has_usable_password():
+            raise serializers.ValidationError({"detail": self.NO_MATCH})
+        check_new_password(attrs["password"], attrs["password_confirm"], user=employee.user)
+        attrs["employee"] = employee
+        return attrs
+
+    def save(self):
+        user = self.validated_data["employee"].user
+        user.set_password(self.validated_data["password"])
+        user.save(update_fields=["password"])
+        return user
 
 
 class SetPasswordSerializer(serializers.Serializer):

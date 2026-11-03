@@ -11,9 +11,29 @@ export function AuthProvider({ children }) {
 
   const loadMe = useCallback(async () => {
     const { data } = await api.get('/me/')
-    setUser(data)
+    // Keep the same object when nothing changed, so pages don't re-render for nothing
+    setUser((prev) => (prev && JSON.stringify(prev) === JSON.stringify(data) ? prev : data))
     return data
   }, [])
+
+  // Permissions are switched on and off by the super admin while people are
+  // signed in: read them again when the tab comes back into view and every
+  // 30 seconds, so menus and pages follow the role without signing out.
+  const signedIn = Boolean(user)
+  useEffect(() => {
+    if (!signedIn) return undefined
+    const refresh = () => {
+      if (document.visibilityState === 'visible' && tokens.access) loadMe().catch(() => {})
+    }
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', refresh)
+    const timer = window.setInterval(refresh, 30000)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', refresh)
+      window.clearInterval(timer)
+    }
+  }, [signedIn, loadMe])
 
   // On page load/refresh: if we have a saved token, find out who we are
   useEffect(() => {

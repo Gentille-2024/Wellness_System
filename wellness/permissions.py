@@ -12,28 +12,40 @@ PERMISSIONS = [
     # Platform (super admin and anyone they trust with these)
     ("manage_companies", "Manage companies", "Add, edit, deactivate and delete service providers", "Platform"),
     ("manage_users", "Manage users & roles", "Create logins, roles and permissions", "Platform"),
-    ("view_all_visits", "See all visits", "See every visit at every company", "Platform"),
+    ("view_all_visits", "See all services used", "See every service used at every company", "Platform"),
     ("manage_payments", "Manage payments", "See amounts owed and mark periods as paid", "Platform"),
+    ("view_price_changes", "See price changes", "See every change of a service price: old and new price, who changed it (boss, receptionist…) and when", "Platform"),
+    ("view_feedback", "See employees' feedback", "Read the comments and complaints employees send about services, at every company", "Platform"),
     # EUCL
     ("manage_employees", "Manage EUCL employees", "Onboard, edit and deactivate EUCL employees", "EUCL"),
+    ("import_employees", "Upload employees from Excel", "Download the Excel template and upload EUCL employees", "EUCL"),
+    ("view_all_employees_attended", "See employees attended (all companies)", "See which EUCL employees used services at every company, what they used and the amounts", "EUCL"),
     # Company (service provider) staff
-    ("record_visits", "Record visits", "Tick the services an employee used at the company", "Company"),
-    ("view_company_visits", "See company visits & payments", "See the company's visits, amounts and payments", "Company"),
+    ("record_visits", "Record services", "Tick the services an employee used at the company", "Company"),
+    ("view_company_visits", "See company services used & payments", "See the services used at the company, amounts and payments", "Company"),
     ("manage_company_services", "Manage company services", "Add services and set their prices", "Company"),
+    ("edit_service_prices", "Edit service prices", "Change the prices of the company's services (not add or switch them off)", "Company"),
     ("manage_company_staff", "Manage company staff", "Create receptionist and other staff logins for the company", "Company"),
     ("view_company_dashboard", "Company dashboard", "Open the company dashboard", "Company"),
     ("view_company_services", "See services & prices", "See the company's services, prices and what EUCL covers", "Company"),
     ("view_employees_attended", "See employees attended", "See which EUCL employees came, what they used and the amounts", "Company"),
     ("take_attendance", "Take employees' attendance", "Tick, on the list of EUCL employees, the services each one is taking", "Company"),
+    ("view_company_feedback", "See feedback on our services", "Read the comments and complaints EUCL employees send about this company's services", "Company"),
     # M&E tool (a separate application that reads this system's data)
     ("export_data", "Export data for M&E", "Read-only access used by the M&E tool to sync its data", "M&E"),
     ("view_me_dashboards", "See M&E dashboards", "Open the M&E dashboards, indicators and reports for all companies", "M&E"),
     ("manage_me_targets", "Manage M&E targets", "Set the targets of the M&E indicators", "M&E"),
     # EUCL employees
-    ("use_services", "Use wellness services", "Browse companies and services, see own visits", "Employee"),
+    # One per page of "My wellness"
+    ("view_my_overview", "Overview", "Open My wellness: today, this month and the latest services", "Employee"),
+    ("view_places", "Places & services", "Browse the partner places and the services EUCL covers", "Employee"),
+    ("view_my_services", "My services", "See and export the services I used", "Employee"),
 ]
 
 ALL_PERMISSIONS = {code for code, *_ in PERMISSIONS}
+
+# The "My wellness" pages of an EUCL employee (one permission per page)
+EMPLOYEE_PAGE_PERMISSIONS = {"view_my_overview", "view_places", "view_my_services"}
 
 # What a company boss may put in a role they create for their own company:
 # the company pages, but not managing staff (only EUCL decides who may do that)
@@ -42,12 +54,41 @@ COMPANY_ROLE_PERMISSIONS = {
 } - {"manage_company_staff"}
 
 
+def company_role_permissions():
+    """COMPANY_ROLE_PERMISSIONS plus the company permissions the super admin added."""
+    from .models import Permission
+
+    added = Permission.objects.filter(area="Company", is_builtin=False).values_list("code", flat=True)
+    return COMPANY_ROLE_PERMISSIONS | set(added)
+
+
+def super_admin_permissions():
+    """
+    What super admins may do: the permissions switched on for the Super admin role.
+    Every switch can be turned off, "Manage users & roles" too. If it is, the
+    roles page is closed to super admins until a Django superuser switches it
+    back on in the Django admin (/admin/ -> Roles -> Super admin).
+    """
+    from .models import Role
+
+    role = Role.objects.filter(code=Role.SUPER_ADMIN).first()
+    if role is None:
+        return all_permission_codes()
+    return set(role.permissions.values_list("code", flat=True))
+
+
+def all_permission_codes():
+    from .models import Permission
+
+    return ALL_PERMISSIONS | set(Permission.objects.values_list("code", flat=True))
+
+
 def get_permissions(user):
     """The set of permission codes a user has through all of their roles."""
     if not user or not user.is_authenticated:
         return set()
     if user.is_superuser:
-        return set(ALL_PERMISSIONS)
+        return super_admin_permissions()
     profile = getattr(user, "userprofile", None)
     if profile is None:
         return set()
@@ -110,8 +151,6 @@ class PermissionRequired(BasePermission):
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
-        if request.user.is_superuser:
-            return True
         deny_if_company_deactivated(request.user)
         if request.method in SAFE_METHODS:
             if getattr(view, "open_read", False):
@@ -119,4 +158,7 @@ class PermissionRequired(BasePermission):
             needed = getattr(view, "read_perms", ())
         else:
             needed = getattr(view, "write_perms", ())
+        if request.user.is_superuser and not needed:
+            return True  # a view that names no permission: super admins may use it
+        # Super admins too: what the Super admin role has switched on
         return has_perm(request.user, *needed)

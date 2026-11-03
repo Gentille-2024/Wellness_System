@@ -5,7 +5,7 @@
 <div class="page-head">
   <div>
     <h1>Companies</h1>
-    <p>Every service provider in {{ month.label }}. Open one for its dashboard and reports.</p>
+    <p>Every service provider in {{ month.label }}. Click a company to see who came, its dashboard and reports.</p>
   </div>
   <div class="page-actions">{% include "partials/month_nav.html" %}</div>
 </div>
@@ -15,14 +15,14 @@
     <table>
       <thead>
         <tr>
-          <th>Company</th><th>Status</th><th class="num">Services covered</th><th class="num">Visits</th>
+          <th>Company</th><th>Status</th><th class="num">Services covered</th><th class="num">Services</th>
           <th class="num">Employees</th><th class="num">Amount</th><th>Share of spending</th><th class="num">Owed</th>
         </tr>
       </thead>
       <tbody>
       {% for row in rows %}
         <tr>
-          <td><a href="{% url 'dashboards:company' row.company.id %}?{{ period_query }}">{{ row.company.name }}</a></td>
+          <td><a href="{% url 'dashboards:company' row.company.id %}?{{ period_query }}{% if access.can_see_names %}#who-came{% endif %}">{{ row.company.name }}</a></td>
           <td>
             {% if row.company.deleted_at %}<span class="badge">Deleted</span>
             {% elif not row.company.is_active %}<span class="badge at_risk">Deactivated</span>

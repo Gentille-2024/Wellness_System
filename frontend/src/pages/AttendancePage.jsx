@@ -33,7 +33,7 @@ export default function AttendancePage() {
 
   const offered = services.data ?? []
   const people = employees.data ?? []
-  const priceOf = Object.fromEntries(offered.map((service) => [service.id, Number(service.eucl_price)]))
+  const priceOf = Object.fromEntries(offered.map((service) => [service.id, Number(service.price)]))
 
   // What is already recorded today: { employeeId: Set(serviceId) }
   const recorded = {}
@@ -60,7 +60,7 @@ export default function AttendancePage() {
 
   const rowAmount = (employeeId) =>
     offered.reduce(
-      (sum, service) => sum + (isRecorded(employeeId, service.id) || isTicked(employeeId, service.id) ? Number(service.eucl_price) : 0),
+      (sum, service) => sum + (isRecorded(employeeId, service.id) || isTicked(employeeId, service.id) ? Number(service.price) : 0),
       0,
     )
 
@@ -135,7 +135,7 @@ export default function AttendancePage() {
                   {offered.map((service) => (
                     <th key={service.id} className="attendance-service">
                       {service.name}
-                      <span className="cell-sub">{formatMoney(service.eucl_price)}</span>
+                      <span className="cell-sub">{formatMoney(service.price)}</span>
                     </th>
                   ))}
                   <th className="num">Amount today</th>

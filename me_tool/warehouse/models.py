@@ -67,7 +67,7 @@ class Employee(models.Model):
 
     @property
     def name(self):
-        return f"{self.first_name} {self.last_name}".strip() or self.code
+        return f"{self.last_name} {self.first_name}".strip() or self.code  # family name first
 
 
 class Payment(models.Model):

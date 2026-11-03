@@ -4,20 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}M&amp;E{% endblock %} · EUCL Wellness M&amp;E</title>
-  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  <link rel="stylesheet" href="{% static 'css/app.css' %}?v=ocean2">
+  <script src="{% static 'js/theme.js' %}?v=ocean2"></script>
   <script src="{% static 'vendor/chart-4.5.1.umd.min.js' %}" defer></script>
   <script src="{% static 'vendor/htmx-2.0.11.min.js' %}" defer></script>
-  <script src="{% static 'js/charts.js' %}" defer></script>
+  <script src="{% static 'js/charts.js' %}?v=ocean2" defer></script>
 </head>
 <body>
 {% with url=request.resolver_match.view_name %}
 <div class="layout">
   <aside class="sidebar">
     <div class="brand-block">
-      <picture>
-        <source srcset="{% static 'img/reg-logo-light.png' %}" media="(prefers-color-scheme: dark)">
-        <img src="{% static 'img/reg-logo.png' %}" alt="Rwanda Energy Group (REG)" class="reg-logo" width="156" height="60">
-      </picture>
+      <img src="{% static 'img/reg-logo.png' %}" alt="Rwanda Energy Group (REG)" class="reg-logo logo-light" width="156" height="60">
+      <img src="{% static 'img/reg-logo-light.png' %}" alt="Rwanda Energy Group (REG)" class="reg-logo logo-dark" width="156" height="60">
       <div class="brand">
         <span class="brand-mark" aria-hidden="true">M&amp;E</span>
         <span>
@@ -67,6 +66,15 @@
   </aside>
 
   <main class="main">
+    <div class="main-top">
+      <div class="main-top-title">{{ access.company_name|default:"EUCL Wellness M&amp;E" }}</div>
+      <div class="main-top-date">{% now "l, j F Y" %}</div>
+      <div class="theme-switch" role="radiogroup" aria-label="Theme">
+        <button type="button" class="theme-option" role="radio" data-theme-value="light" title="Light theme" aria-label="Light theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></button>
+        <button type="button" class="theme-option" role="radio" data-theme-value="dark" title="Dark theme" aria-label="Dark theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+        <button type="button" class="theme-option" role="radio" data-theme-value="ocean" title="Ocean theme" aria-label="Ocean theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 7c2-1.6 3.5-1.6 5 0s3 1.6 5 0 3.5-1.6 5 0 3 1.6 5 0M2 12c2-1.6 3.5-1.6 5 0s3 1.6 5 0 3.5-1.6 5 0 3 1.6 5 0M2 17c2-1.6 3.5-1.6 5 0s3 1.6 5 0 3.5-1.6 5 0 3 1.6 5 0"/></svg></button>
+      </div>
+    </div>
     {% for message in messages %}
       <div class="alert alert-{% if message.tags == 'error' %}error{% else %}{{ message.tags|default:'info' }}{% endif %}">{{ message }}</div>
     {% endfor %}

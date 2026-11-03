@@ -59,12 +59,12 @@ def build_xlsx(data, report):
 
     # ---- Summary
     ws = _sheet(wb, "Summary", data, ["Measure", "Value", f"Change from previous {data['unit']}"], [
-        ["Services used (visits)", k["visits"], _num(k["visits_change"])],
+        ["Services used", k["visits"], _num(k["visits_change"])],
         ["EUCL employees who used a service", k["participants"], _num(k["participants_change"])],
         ["Active EUCL employees", k["active_employees"], None],
         ["Participation rate (%)", _num(k["participation"]), None],
         ["Amount spent (RWF)", _num(k["spend"]), _num(k["spend_change"])],
-        ["Cost per visit (RWF)", _num(k["cost_per_visit"]), None],
+        ["Cost per service (RWF)", _num(k["cost_per_visit"]), None],
         [f"Still owed for this {data['unit']} (RWF)", _num(k["unpaid"]), None],
         ["Owed in total, all periods (RWF)", _num(k["owed_all"]), None],
     ], widths=[38, 18, 22])
@@ -73,7 +73,7 @@ def build_xlsx(data, report):
         row[1].number_format = MONEY if "RWF" in label else PERCENT if "%" in label else NUMBER
         row[2].number_format = '+0.0"%";-0.0"%";0"%"'
     ws.append([])
-    ws.append([data["trend_title"], "Visits", "Participants", "Amount (RWF)"])
+    ws.append([data["trend_title"], "Services", "Participants", "Amount (RWF)"])
     for cell in ws[ws.max_row]:
         cell.fill, cell.font = HEAD, WHITE_BOLD
     for t in data["trend"]:
@@ -108,7 +108,7 @@ def _rest(wb, data):
     # ---- Services
     services = data["services"]
     _sheet(wb, "Services", data,
-           ["Service", "Company", "Covered by EUCL", "EUCL pays (RWF)", "Visits", "Employees", "Amount (RWF)", "Share (%)", f"Visits previous {data['unit']}", "Change (%)"],
+           ["Service", "Company", "Covered by EUCL", "Price (RWF)", "Services used", "Employees", "Amount (RWF)", "Share (%)", f"Services used previous {data['unit']}", "Change (%)"],
            [[s["name"], s["company"], "Yes" if s["covered"] else "No", _num(s["eucl_price"]), s["visits"], s["participants"],
              _num(s["spend"]), _num(s["share"]), s["previous_visits"], _num(s["change"])] for s in services],
            formats={4: MONEY, 7: MONEY, 8: PERCENT, 10: '+0.0"%";-0.0"%";0"%"'},
@@ -118,21 +118,21 @@ def _rest(wb, data):
     # ---- Companies (EUCL overall only)
     if data["all_companies"]:
         companies = data["companies"]
-        _sheet(wb, "Companies", data, ["Company", "Visits", "Employees", "Amount (RWF)", "Still owed (RWF)", "Share (%)"],
+        _sheet(wb, "Companies", data, ["Company", "Services", "Employees", "Amount (RWF)", "Still owed (RWF)", "Share (%)"],
                [[c["company__name"], c["visits"], c["participants"], _num(c["spend"]), _num(c["unpaid"]), _num(c["share"])] for c in companies],
                formats={4: MONEY, 5: MONEY, 6: PERCENT}, widths=[30, 10, 12, 16, 16, 10],
                total=["Total", sum(c["visits"] for c in companies), None, _num(sum(c["spend"] for c in companies)),
                       _num(sum(c["unpaid"] for c in companies)), 100 if companies else None])
 
     # ---- Departments
-    _sheet(wb, "Departments", data, ["Department", "Active employees", "Employees who used a service", "Participation (%)", "Visits", "Amount (RWF)"],
+    _sheet(wb, "Departments", data, ["Department", "Active employees", "Employees who used a service", "Participation (%)", "Services", "Amount (RWF)"],
            [[d["department"], d["employees"], d["participants"], _num(d["participation"]), d["visits"], _num(d["spend"])] for d in data["departments"]],
            formats={4: PERCENT, 6: MONEY}, widths=[24, 16, 26, 16, 10, 16])
 
     # ---- Employees (EUCL only)
     if data["include_names"]:
-        _sheet(wb, "Most active employees", data, ["Employee", "Employee ID", "Department", "Visits", "Days", "Amount (RWF)"],
-               [[f"{e['employee__first_name']} {e['employee__last_name']}".strip(), e["employee__code"], e["employee__department"],
+        _sheet(wb, "Most active employees", data, ["Employee", "Employee ID", "Department", "Services", "Days", "Amount (RWF)"],
+               [[f"{e['employee__last_name']} {e['employee__first_name']}".strip(), e["employee__code"], e["employee__department"],
                  e["visits"], e["days"], _num(e["spend"])] for e in data["employees"]],
                formats={6: MONEY}, widths=[28, 13, 18, 9, 8, 16])
 
@@ -148,6 +148,6 @@ def _rest(wb, data):
             row[3:3] = [v.employee.name, v.employee.code]
         rows.append(row)
     amount_col = headers.index("Amount (RWF)") + 1
-    ws = _sheet(wb, "Visits", data, headers, rows, formats={1: "dd/mm/yyyy", amount_col: MONEY},
+    ws = _sheet(wb, "Services used", data, headers, rows, formats={1: "dd/mm/yyyy", amount_col: MONEY},
                 widths=[12, 24, 22] + ([24, 12] if data["include_names"] else []) + [18, 15, 7],
                 total=["Total"] + [""] * (amount_col - 2) + [sum(r[amount_col - 1] for r in rows), ""])

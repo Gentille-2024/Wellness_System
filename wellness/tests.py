@@ -9,14 +9,18 @@ from .models import Company, Employee, Payment, Permission, Role, Service, UserP
 from .permissions import COMPANY_DEACTIVATED
 
 
-# A receptionist with every page switched on (see migration 0014)
-DESK_ROLES = (
-    "COMPANY_DASHBOARD",
-    "COMPANY_RECORD_VISITS",
-    "COMPANY_SERVICES",
-    "COMPANY_EMPLOYEES_ATTENDED",
-    "COMPANY_ATTENDANCE",
-)
+# The built-in receptionist (see migration 0018)
+DESK_ROLES = ("COMPANY_RECEPTIONIST",)
+
+# One-page roles used by some tests to check single permissions. They are
+# not built in any more (migration 0018), so the tests create them.
+PAGE_ROLES = [
+    ("COMPANY_DASHBOARD", "Dashboard", "view_company_dashboard"),
+    ("COMPANY_RECORD_VISITS", "Record services", "record_visits"),
+    ("COMPANY_SERVICES", "Services & prices", "view_company_services"),
+    ("COMPANY_EMPLOYEES_ATTENDED", "Employees attended", "view_employees_attended"),
+    ("COMPANY_ATTENDANCE", "Employees attendance", "take_attendance"),
+]
 
 
 class EuclTestCase(APITestCase):
@@ -29,6 +33,9 @@ class EuclTestCase(APITestCase):
     def setUp(self):
         self.today = timezone.localdate()
         self.admin = User.objects.create_superuser("boss_admin", "admin@eucl.test", "Test@12345")
+        for code, name, permission in PAGE_ROLES:
+            role = Role.objects.create(code=code, name=f"{name} only", is_company_role=True)
+            role.permissions.set(Permission.objects.filter(code=permission))
 
         self.fitzone = Company.objects.create(name="FitZone", email="info@fitzone.test")
         self.spa = Company.objects.create(name="BlueSpa", email="info@bluespa.test")
@@ -55,7 +62,7 @@ class EuclTestCase(APITestCase):
 
     def make_employee(self, username):
         user = self.make_user(username, "EMPLOYEE")
-        return Employee.objects.create(user=user, phone="+250788000000", department="IT", position="Engineer")
+        return Employee.objects.create(user=user, employee_id=username.upper(), phone="+250788000000", department="IT", position="Engineer")
 
     def as_user(self, user):
         self.client.force_authenticate(user)
@@ -79,11 +86,10 @@ class AccessTests(EuclTestCase):
     def test_login_is_required(self):
         self.assertEqual(self.client.get("/api/visits/").status_code, 401)
 
-    def test_me_lists_permissions_from_all_roles(self):
-        both = self.make_user("both", "COMPANY_RECORD_VISITS", "EUCL_HR", company=self.fitzone)
-        perms = self.as_user(both).get("/api/me/").data["permissions"]
-        self.assertIn("record_visits", perms)
+    def test_me_lists_the_permissions_of_the_role(self):
+        perms = self.as_user(self.hr).get("/api/me/").data["permissions"]
         self.assertIn("manage_employees", perms)
+        self.assertNotIn("record_visits", perms)
 
     def test_employee_cannot_record_visits(self):
         self.assertEqual(self.record(self.john.user, self.john, self.gym).status_code, 403)
@@ -126,7 +132,24 @@ class PlacesAndServicesTests(EuclTestCase):
         )
         self.assertEqual(response.status_code, 400)
 
-    def test_receptionist_cannot_change_prices(self):
+    def test_receptionist_can_change_prices_only(self):
+        desk = self.as_user(self.fit_desk)
+        response = desk.patch(f"/api/services/{self.gym.id}/", {"price": "3200"}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.gym.refresh_from_db()
+        self.assertEqual(self.gym.price, Decimal("3200"))
+        # ...but not add services, rename them or switch them off
+        self.assertEqual(desk.post("/api/services/", {"name": "Yoga", "price": "1"}, format="json").status_code, 403)
+        self.assertEqual(desk.patch(f"/api/services/{self.gym.id}/", {"is_active": False}, format="json").status_code, 403)
+        self.assertEqual(desk.patch(f"/api/services/{self.gym.id}/", {"name": "X", "price": "1"}, format="json").status_code, 403)
+
+    def test_receptionist_cannot_change_another_companys_price(self):
+        other = Service.objects.filter(company=self.spa).first()
+        response = self.as_user(self.fit_desk).patch(f"/api/services/{other.id}/", {"price": "1"}, format="json")
+        self.assertEqual(response.status_code, 404)
+
+    def test_receptionist_without_the_permission_cannot_change_prices(self):
+        Role.objects.get(code="COMPANY_RECEPTIONIST").permissions.remove(Permission.objects.get(code="edit_service_prices"))
         response = self.as_user(self.fit_desk).patch(f"/api/services/{self.gym.id}/", {"price": "1"}, format="json")
         self.assertEqual(response.status_code, 403)
 
@@ -179,7 +202,7 @@ class VisitTests(EuclTestCase):
         self.assertEqual(count(self.john.user), 1)  # own visits
         self.assertEqual(count(self.fit_boss), 1)   # own company
         self.assertEqual(count(self.spa_desk), 1)
-        self.assertEqual(count(self.hr), 2)         # all (view_all_visits)
+        self.assertEqual(count(self.hr), 0)         # HR is like an employee: only their own
         self.assertEqual(count(self.admin), 2)
 
     def test_reception_can_undo_todays_unpaid_visit(self):
@@ -266,7 +289,7 @@ class EmployeeTests(EuclTestCase):
 
     def register(self, user, **overrides):
         data = {
-            "first_name": "New", "last_name": "Person", "username": "newperson",
+            "employee_id": "emp0101", "first_name": "New", "last_name": "Person", "username": "newperson",
             "email": "new@eucl.test", "phone": "+250 788 123 456",
             "department": "Finance", "position": "Accountant",
             "password": "Wellness@2026", "password_confirm": "Wellness@2026",
@@ -277,13 +300,219 @@ class EmployeeTests(EuclTestCase):
     def test_hr_onboards_an_employee(self):
         response = self.register(self.hr)
         self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["employee_id"], "EMP0101")  # typed by HR, tidied
         user = User.objects.get(username="newperson")
         self.assertEqual(list(user.userprofile.roles.values_list("code", flat=True)), ["EMPLOYEE"])
 
-    def test_every_field_is_required(self):
-        for field in ["email", "phone", "department", "position", "password_confirm"]:
+    def test_required_fields(self):
+        for field in ["employee_id", "first_name", "last_name", "department", "position"]:
             with self.subTest(missing=field):
                 self.assertEqual(self.register(self.hr, **{field: ""}).status_code, 400)
+        # passwords that don't match
+        self.assertEqual(self.register(self.hr, password_confirm="Other@2026").status_code, 400)
+
+    def test_no_automatic_id_and_ids_are_unique(self):
+        self.assertEqual(self.register(self.hr, employee_id=self.john.employee_id, username="x2").status_code, 400)
+
+    def test_username_is_the_last_name_and_the_password_comes_at_first_login(self):
+        response = self.register(self.hr, employee_id="EMP0200", last_name="Charlotte", username="",
+                                 password="", password_confirm="", email="c1@eucl.test", phone="0788 000 222")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["username"], "Charlotte")
+        # a second Charlotte gets Charlotte2
+        second = self.register(self.hr, employee_id="EMP0201", last_name="Charlotte", username="",
+                               password="", password_confirm="", email="c2@eucl.test")
+        self.assertEqual(second.data["username"], "Charlotte2")
+        # no password yet: the Employee ID does not work as a password
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.post("/api/login/", {"username": "Charlotte", "password": "EMP0200"}, format="json").status_code, 401)
+
+    def test_email_and_phone_are_required(self):
+        for field in ["email", "phone"]:
+            with self.subTest(missing=field):
+                response = self.register(self.hr, username="", password="", password_confirm="", **{field: ""})
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.data)
+
+    def test_hr_department_gets_the_hr_role(self):
+        response = self.register(self.hr, department="hr")
+        employee = Employee.objects.get(pk=response.data["id"])
+        roles = set(employee.user.userprofile.roles.values_list("code", flat=True))
+        self.assertEqual(roles, {"EUCL_HR"})  # one role: HR instead of Employee
+        perms = set(self.as_user(employee.user).get("/api/me/").data["permissions"])
+        self.assertTrue({"view_my_overview", "view_places", "view_my_services", "manage_employees", "import_employees"} <= perms)
+        self.assertNotIn("view_all_visits", perms)
+        # moving out of HR gives the Employee role back instead
+        self.as_user(self.admin).patch(f"/api/employees/{employee.id}/", {"department": "Finance"}, format="json")
+        self.assertEqual(list(employee.user.userprofile.roles.values_list("code", flat=True)), ["EMPLOYEE"])
+
+
+class FirstLoginTests(EuclTestCase):
+    """An employee HR added creates their own account (password) at first login."""
+
+    def setUp(self):
+        super().setUp()
+        from django.core.cache import cache
+        cache.clear()  # the first-login throttle counts tries per address
+        self.as_user(self.hr).post("/api/employees/register/", {
+            "employee_id": "EMP0700", "first_name": "NATUKUNDA", "last_name": "Charlotte",
+            "email": "cnatukunda@eucl.test", "phone": "+250787778849", "department": "HR", "position": "Manager",
+        }, format="json")
+        self.client.force_authenticate(None)
+
+    def first_login(self, **overrides):
+        data = {"employee_id": "emp0700", "contact": "cnatukunda@eucl.test",
+                "password": "MyWellness@26", "password_confirm": "MyWellness@26"}
+        data.update(overrides)
+        return self.client.post("/api/first-login/", data, format="json")
+
+    def login(self, username, password):
+        return self.client.post("/api/login/", {"username": username, "password": password}, format="json")
+
+    def test_with_email_then_sign_in(self):
+        response = self.first_login()
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["username"], "Charlotte")
+        self.assertEqual(self.login("Charlotte", "MyWellness@26").status_code, 200)
+
+    def test_with_phone_written_another_way(self):
+        self.assertEqual(self.first_login(contact="0787 778 849").status_code, 200)
+
+    def test_wrong_details_or_twice_are_refused(self):
+        self.assertEqual(self.first_login(contact="someone@else.test").status_code, 400)
+        self.assertEqual(self.first_login(employee_id="NOPE").status_code, 400)
+        self.assertEqual(self.first_login().status_code, 200)
+        again = self.first_login(password="Other@Pass26", password_confirm="Other@Pass26")
+        self.assertEqual(again.status_code, 400)  # the account exists: sign in instead
+        self.assertEqual(self.login("Charlotte", "MyWellness@26").status_code, 200)
+
+    def test_password_rules(self):
+        self.assertEqual(self.first_login(password="123", password_confirm="123").status_code, 400)
+        self.assertEqual(self.first_login(password_confirm="Different@26").status_code, 400)
+
+
+class EmployeeImportTests(EuclTestCase):
+    """HR downloads the Excel template and uploads employees."""
+
+    def xlsx(self, rows, header=("EmpID", "First name", "Last name", "Email", "Phone", "Department", "Position")):
+        import io
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Employees"
+        ws.append(list(header))
+        for row in rows:
+            ws.append(list(row))
+        out = io.BytesIO()
+        wb.save(out)
+        return SimpleUploadedFile("employees.xlsx", out.getvalue())
+
+    def upload(self, user, rows, **kwargs):
+        return self.as_user(user).post("/api/employees/import/", {"file": self.xlsx(rows, **kwargs)}, format="multipart")
+
+    def test_template_download(self):
+        response = self.as_user(self.hr).get("/api/employees/template/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("spreadsheetml", response["Content-Type"])
+        self.assertEqual(self.as_user(self.fit_desk).get("/api/employees/template/").status_code, 403)
+
+    def test_upload_creates_employees_named_by_last_name(self):
+        response = self.upload(self.hr, [
+            ("EMP0301", "NATUKUNDA", "Charlotte", "cn@eucl.test", "+250787778849", "Finance", "Accountant"),
+            (302, "UWASE", "Charlotte", "cu@eucl.test", 788123456, "HR", "HR Officer"),  # numbers in Excel
+        ])
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data, {"created": 2, "updated": 0})
+        first = Employee.objects.get(employee_id="EMP0301")
+        self.assertEqual((first.user.username, first.user.email, first.phone), ("Charlotte", "cn@eucl.test", "+250787778849"))
+        second = Employee.objects.get(employee_id="302")
+        self.assertEqual((second.user.username, second.phone), ("Charlotte2", "0788123456"))
+        self.assertEqual(list(second.user.userprofile.roles.values_list("code", flat=True)), ["EUCL_HR"])
+        self.assertFalse(first.user.has_usable_password())  # created at first login
+        # ...which works with the phone from the file
+        from django.core.cache import cache
+        cache.clear()
+        self.client.force_authenticate(None)
+        done = self.client.post("/api/first-login/", {"employee_id": "302", "contact": "0788123456",
+                                "password": "MyWellness@26", "password_confirm": "MyWellness@26"}, format="json")
+        self.assertEqual(done.data["username"], "Charlotte2")
+
+    def test_family_name_first_is_the_username(self):
+        header = ("EmpID", "Last name", "First name", "Email", "Phone", "Department", "Position")
+        response = self.upload(self.hr, [("EMP0009", "NATUKUNDA", "Charlotte", "cn9@eucl.test", "0788000009", "HR", "Manager")], header=header)
+        self.assertEqual(response.status_code, 200, response.data)
+        employee = Employee.objects.get(employee_id="EMP0009")
+        self.assertEqual(employee.user.username, "NATUKUNDA")
+        data = self.as_user(self.hr).get(f"/api/employees/{employee.id}/").data
+        self.assertEqual(data["user_name"], "NATUKUNDA Charlotte")  # family name shown first
+
+    def test_existing_ids_are_updated(self):
+        response = self.upload(self.hr, [(self.john.employee_id, "John", "Newname", "john@new.test", "0788000010", "Legal", "Lawyer")])
+        self.assertEqual(response.data, {"created": 0, "updated": 1})
+        self.john.refresh_from_db()
+        self.assertEqual((self.john.user.last_name, self.john.department, self.john.user.email), ("Newname", "Legal", "john@new.test"))
+
+    def test_any_bad_row_saves_nothing(self):
+        response = self.upload(self.hr, [
+            ("EMP0401", "Ok", "Row", "ok@eucl.test", "0788000001", "IT", "Dev"),
+            ("EMP0402", "", "Missing", "m@eucl.test", "0788000002", "IT", "Dev"),
+            ("EMP0401", "Twice", "Same", "t@eucl.test", "0788000003", "IT", "Dev"),
+            ("EMP0403", "No", "Contact", "", "", "IT", "Dev"),
+            ("EMP0404", "Bad", "Email", "not-an-email", "0788000004", "IT", "Dev"),
+            ("EMP0405", "Same", "Email", "OK@eucl.test", "0788000005", "IT", "Dev"),
+        ])
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual([e["row"] for e in response.data["errors"]], [3, 4, 5, 6, 7])
+        messages = [e["message"] for e in response.data["errors"]]
+        self.assertEqual(messages[0], "Row 3: missing data in First name.")
+        self.assertTrue(messages[1].startswith("Row 4: EmpID EMP0401 is used twice: also on row 2."))
+        self.assertEqual(messages[2], "Row 5: missing data in Email and Phone.")
+        self.assertTrue(messages[3].startswith("Row 6: invalid email “not-an-email”."))
+        self.assertEqual(messages[4], "Row 7: email OK@eucl.test is used twice: also on row 2.")
+        self.assertIn("rows 3, 4, 5, 6 and 7", response.data["detail"])
+        self.assertFalse(Employee.objects.filter(employee_id="EMP0401").exists())
+
+    def test_every_problem_of_a_row_is_listed(self):
+        response = self.upload(self.hr, [("EMP0501", "", "", "bad", "12", "", "Dev")])
+        messages = [e["message"] for e in response.data["errors"]]
+        self.assertEqual(messages[0], "Row 2: missing data in Last name, First name and Department.")
+        self.assertTrue(any("invalid email" in m for m in messages))
+        self.assertTrue(any("invalid phone number “12”" in m for m in messages))
+
+    def test_a_duplicate_id_is_reported_even_if_the_first_row_has_problems(self):
+        response = self.upload(self.hr, [
+            ("EMP0701", "A", "", "a@b.test", "0788000011", "IT", "Dev"),
+            ("EMP0701", "C", "D", "c@d.test", "0788000012", "IT", "Dev"),
+        ])
+        messages = [e["message"] for e in response.data["errors"]]
+        self.assertIn("Row 3: EmpID EMP0701 is used twice: also on row 2.", messages)
+
+    def test_missing_email_or_phone_is_refused(self):
+        # what happened before: rows without email or phone were saved
+        response = self.upload(self.hr, [
+            ("1012364", "ITEKA", "Beca", "", "0787654328", "IT", "Technician"),
+            ("1002354", "Nobel", "Jordy", "jonobel@eucl.test", "", "Software", "Developer"),
+        ])
+        self.assertEqual(response.status_code, 400)
+        messages = [e["message"] for e in response.data["errors"]]
+        self.assertEqual(messages, ["Row 2: missing data in Email.", "Row 3: missing data in Phone."])
+        self.assertFalse(Employee.objects.filter(employee_id__in=["1012364", "1002354"]).exists())
+
+    def test_too_long_values_are_reported_not_crashing(self):
+        response = self.upload(self.hr, [("EMP0601", "A", "B", "a@b.test", "0788000013", "D" * 120, "Dev")])
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Department is too long (120 characters, at most 100)", response.data["errors"][0]["message"])
+
+    def test_wrong_columns(self):
+        response = self.upload(self.hr, [("x",)], header=("Name",))
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("header", response.data["detail"])
+
+    def test_only_with_the_permission(self):
+        row = ("E1", "A", "B", "a@b.test", "0788000014", "C", "D")
+        self.assertEqual(self.upload(self.fit_desk, [row]).status_code, 403)
+        self.assertEqual(self.upload(self.john.user, [row]).status_code, 403)
 
 
 class RoleAndUserTests(EuclTestCase):
@@ -301,8 +530,11 @@ class RoleAndUserTests(EuclTestCase):
         self.assertEqual(self.as_user(finance).get("/api/payments/balances/").status_code, 200)
         self.assertEqual(self.as_user(finance).get("/api/users/").status_code, 403)
 
-    def test_role_needs_at_least_one_permission(self):
+    def test_eucl_can_make_an_empty_role_but_a_boss_cannot(self):
+        # EUCL names the role first, then switches its permissions on
         response = self.as_user(self.admin).post("/api/roles/", {"name": "Empty", "permissions": []}, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        response = self.as_user(self.fit_boss).post("/api/roles/", {"name": "Empty2", "permissions": []}, format="json")
         self.assertEqual(response.status_code, 400)
 
     def test_built_in_and_used_roles_cannot_be_deleted(self):
@@ -312,7 +544,7 @@ class RoleAndUserTests(EuclTestCase):
         self.assertEqual(self.as_user(self.admin).delete(f"/api/roles/{custom.id}/").status_code, 204)
 
     def test_boss_cannot_make_roles_with_eucl_permissions(self):
-        response = self.as_user(self.fit_boss).post("/api/roles/", {"name": "X", "permissions": ["use_services"]}, format="json")
+        response = self.as_user(self.fit_boss).post("/api/roles/", {"name": "X", "permissions": ["view_places"]}, format="json")
         self.assertEqual(response.status_code, 400)
         self.assertIn("permissions", response.data)
         self.assertEqual(self.as_user(self.fit_desk).post("/api/roles/", {"name": "Y", "permissions": ["record_visits"]}, format="json").status_code, 403)
@@ -356,6 +588,30 @@ class RoleAndUserTests(EuclTestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_only_one_role_per_user(self):
+        response = self.as_user(self.admin).post(
+            "/api/users/",
+            {"username": "two", "first_name": "T", "last_name": "W", "email": "two@test.test",
+             "roles": ["EUCL_HR", "ME_OFFICER"], "password": "Reception@2026", "password_confirm": "Reception@2026"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("roles", response.data)
+        response = self.as_user(self.admin).patch(
+            f"/api/users/{self.john.user.id}/", {"roles": ["EMPLOYEE", "EUCL_HR"]}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.as_user(self.admin).patch(f"/api/users/{self.john.user.id}/", {"roles": []}, format="json").status_code, 400)
+
+    def test_an_employee_can_get_another_role_and_the_employee_role_back(self):
+        url = f"/api/users/{self.john.user.id}/"
+        response = self.as_user(self.admin).patch(url, {"roles": ["ME_OFFICER"]}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["roles"], ["ME_OFFICER"])  # Employee is replaced, not added
+        self.assertEqual(response.data["employee_id"], "JOHN")  # the Employee record stays
+        response = self.as_user(self.admin).patch(url, {"roles": ["EMPLOYEE"]}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["roles"], ["EMPLOYEE"])
+
 
 class MyAccountTests(EuclTestCase):
 
@@ -373,7 +629,7 @@ class MyAccountTests(EuclTestCase):
 class CoveredServicesTests(EuclTestCase):
     """
     A company lists everything it offers at its own prices; EUCL ticks the
-    services its employees may use and agrees the amount it pays for each.
+    services its employees may use and pays the company's own price.
     """
 
     def setUp(self):
@@ -382,10 +638,10 @@ class CoveredServicesTests(EuclTestCase):
         self.sauna = Service.objects.create(company=self.fitzone, name="Sauna", price=Decimal("8000"))
 
     def choose(self, user, company, chosen):
-        """chosen: [(service, amount), ...]"""
+        """chosen: [service, ...]"""
         return self.as_user(user).post(
             f"/api/companies/{company.id}/covered-services/",
-            {"services": [{"id": s.id, "eucl_price": str(amount)} for s, amount in chosen]},
+            {"services": [{"id": s.id} for s in chosen]},
             format="json",
         )
 
@@ -403,7 +659,7 @@ class CoveredServicesTests(EuclTestCase):
         self.sauna.refresh_from_db()
         self.assertFalse(self.sauna.is_approved)
         self.assertIsNone(self.sauna.eucl_price)
-        self.assertEqual(self.choose(self.fit_boss, self.fitzone, [(self.sauna, 5000)]).status_code, 403)
+        self.assertEqual(self.choose(self.fit_boss, self.fitzone, [self.sauna]).status_code, 403)
 
     def test_employees_see_every_service_marked_covered_or_not(self):
         place = self.as_user(self.john.user).get(f"/api/places/{self.fitzone.id}/").data
@@ -417,38 +673,41 @@ class CoveredServicesTests(EuclTestCase):
     def test_uncovered_services_cannot_be_recorded(self):
         self.assertEqual(self.record(self.fit_desk, self.john, self.sauna).status_code, 400)
 
-    def test_eucl_chooses_several_services_with_amounts(self):
-        response = self.choose(self.admin, self.fitzone, [(self.gym, 2500), (self.sauna, 6000)])
+    def test_eucl_chooses_several_services_at_the_company_price(self):
+        response = self.choose(self.admin, self.fitzone, [self.gym, self.sauna])
         self.assertEqual(response.status_code, 200)
         # Money comes back as text ("2500.00"), so compare it as a Decimal
         covered = {
             s["name"]: (s["is_approved"], Decimal(s["eucl_price"]) if s["eucl_price"] else None)
             for s in response.data
         }
-        self.assertEqual(covered["Gym"], (True, Decimal("2500")))
-        self.assertEqual(covered["Sauna"], (True, Decimal("6000")))
+        self.assertEqual(covered["Gym"], (True, Decimal("3000")))
+        self.assertEqual(covered["Sauna"], (True, Decimal("8000")))
         self.assertFalse(covered["Swimming"][0])
         # Takes effect straight away for reception
         self.assertEqual(self.record(self.fit_desk, self.john, self.sauna).status_code, 201)
         self.assertEqual(self.record(self.fit_desk, self.john, self.pool).status_code, 400)
 
-    def test_visits_are_charged_at_the_eucl_amount(self):
-        self.choose(self.admin, self.fitzone, [(self.sauna, 6000)])
+    def test_visits_are_charged_at_the_company_price(self):
+        self.choose(self.admin, self.fitzone, [self.sauna])
         self.record(self.fit_desk, self.john, self.sauna)
         visit = Visit.objects.get(service=self.sauna)
-        self.assertEqual(visit.price, Decimal("6000"))  # not the company's 8,000
+        self.assertEqual(visit.price, Decimal("8000"))
 
-    def test_each_covered_service_needs_an_amount(self):
-        response = self.as_user(self.admin).post(
-            f"/api/companies/{self.fitzone.id}/covered-services/", {"services": [{"id": self.sauna.id}]}, format="json"
-        )
-        self.assertEqual(response.status_code, 400)
+    def test_a_new_company_price_applies_to_new_visits(self):
+        self.as_user(self.fit_boss).patch(f"/api/services/{self.gym.id}/", {"price": "3500"}, format="json")
+        self.gym.refresh_from_db()
+        self.assertEqual(self.gym.eucl_price, Decimal("3500"))  # mirrors the price
+        self.record(self.fit_desk, self.john, self.gym)
+        self.assertEqual(Visit.objects.get(service=self.gym).price, Decimal("3500"))
+
+    def test_eucl_can_cover_a_service_without_an_amount(self):
         response = self.as_user(self.admin).patch(f"/api/services/{self.sauna.id}/", {"is_approved": True}, format="json")
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("eucl_price", response.data)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(Decimal(response.data["eucl_price"]), Decimal("8000"))
 
     def test_another_companys_service_cannot_be_chosen(self):
-        self.assertEqual(self.choose(self.admin, self.fitzone, [(self.massage, 1)]).status_code, 400)
+        self.assertEqual(self.choose(self.admin, self.fitzone, [self.massage]).status_code, 400)
 
     def test_places_can_be_filtered_to_those_with_covered_services(self):
         self.choose(self.admin, self.spa, [])
@@ -500,10 +759,103 @@ class EmployeesAttendedTests(EuclTestCase):
         viewer_role.permissions.set(Permission.objects.filter(code="view_company_visits"))
         auditor = self.make_user("auditor", "AUDITOR", company=self.fitzone)
         self.assertEqual(self.report(auditor).data["totals"]["employees"], 2)
-        # ...and if the "Employees attended" role loses its permission, so does the receptionist
-        page_role = Role.objects.get(code="COMPANY_EMPLOYEES_ATTENDED")
-        page_role.permissions.set(Permission.objects.filter(code="manage_company_services"))
+        # ...and if the Receptionist role loses the permission, so do receptionists
+        receptionist = Role.objects.get(code="COMPANY_RECEPTIONIST")
+        receptionist.permissions.remove(*Permission.objects.filter(code="view_employees_attended"))
         self.assertEqual(self.report(self.fit_desk).status_code, 403)
+
+
+class HrEmployeesAttendedTests(EuclTestCase):
+    """EUCL HR sees the employees attended at every company (permission view_all_employees_attended)."""
+
+    def setUp(self):
+        super().setUp()
+        self.record(self.fit_desk, self.john, self.gym, self.pool)   # FitZone: 3,000 + 5,000
+        self.past_visit(self.mary, self.massage)                     # BlueSpa: 15,000
+
+    def report(self, user, **params):
+        return self.as_user(user).get("/api/visits/by-employee/", params)
+
+    def test_hr_sees_every_company(self):
+        response = self.report(self.hr)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["totals"], {"employees": 2, "visits": 3, "amount": Decimal("23000")})
+        mary = next(row for row in response.data["employees"] if row["employee"] == self.mary.id)
+        self.assertEqual([(s["service"], s["company"]) for s in mary["services"]], [("Massage", "BlueSpa")])
+
+    def test_hr_can_narrow_to_one_company(self):
+        data = self.report(self.hr, company=self.spa.id).data
+        self.assertEqual(data["totals"], {"employees": 1, "visits": 1, "amount": Decimal("15000")})
+
+    def test_hr_can_list_companies_for_the_filter(self):
+        response = self.as_user(self.hr).get("/api/companies/")
+        self.assertEqual(response.status_code, 200)
+
+    def test_hr_still_only_sees_own_usage_records(self):
+        # The permission opens the summary, not every usage record
+        response = self.as_user(self.hr).get("/api/visits/")
+        self.assertEqual(response.status_code, 200)
+        rows = response.data["results"] if isinstance(response.data, dict) else response.data
+        self.assertEqual(len(rows), 0)
+
+    def test_switching_it_off_for_hr_closes_the_report(self):
+        Role.objects.get(code="EUCL_HR").permissions.remove(*Permission.objects.filter(code="view_all_employees_attended"))
+        self.assertEqual(self.report(self.hr).status_code, 403)
+
+
+class EachPermissionWorksOnItsOwnTests(EuclTestCase):
+    """A role with just one permission switched on can use what that permission opens."""
+
+    def only(self, code, company=None):
+        role = Role.objects.create(code=f"ONLY_{code.upper()}", name=f"Only {code}", is_company_role=company is not None)
+        role.permissions.set(Permission.objects.filter(code=code))
+        return self.make_user(f"only_{code}", role.code, company=company)
+
+    def test_switching_a_permission_on_takes_effect_straight_away(self):
+        boss_role = Role.objects.get(code="COMPANY_BOSS")
+        self.assertEqual(self.as_user(self.fit_boss).get("/api/price-changes/").status_code, 403)
+        codes = list(boss_role.permissions.values_list("code", flat=True)) + ["view_price_changes"]
+        self.assertEqual(self.as_user(self.admin).patch(f"/api/roles/{boss_role.id}/", {"permissions": codes}, format="json").status_code, 200)
+        self.assertIn("view_price_changes", self.as_user(self.fit_boss).get("/api/me/").data["permissions"])
+        self.assertEqual(self.as_user(self.fit_boss).get("/api/price-changes/").status_code, 200)
+
+    def test_upload_employees_without_manage_employees(self):
+        user = self.only("import_employees")
+        self.assertEqual(self.as_user(user).get("/api/employees/template/").status_code, 200)
+        self.assertEqual(self.as_user(user).get("/api/employees/").status_code, 403)  # not the list
+
+    def test_manage_users_can_list_companies(self):
+        self.assertEqual(self.as_user(self.only("manage_users")).get("/api/companies/").status_code, 200)
+
+    def test_visit_lists_can_read_department_names(self):
+        for code, company in (("manage_payments", None), ("view_company_visits", self.fitzone)):
+            with self.subTest(code=code):
+                response = self.as_user(self.only(code, company)).get("/api/employees/departments/")
+                self.assertEqual(response.status_code, 200)
+
+
+class UserAccessTests(EuclTestCase):
+    """Users & roles shows what one login may do and which role gives each permission."""
+
+    def access(self, user, account):
+        return self.as_user(user).get(f"/api/users/{account.id}/access/")
+
+    def test_each_permission_names_the_role_that_gives_it(self):
+        data = self.access(self.admin, self.hr).data
+        sources = {p["code"]: p["roles"] for p in data["permissions"]}
+        self.assertEqual(sources["view_feedback"], ["HR"])
+        self.assertEqual(sources["view_my_overview"], ["HR"])
+
+    def test_switching_it_off_in_the_role_takes_it_away(self):
+        hr_role = Role.objects.get(code="EUCL_HR")
+        codes = [c for c in hr_role.permissions.values_list("code", flat=True) if c != "view_feedback"]
+        self.assertEqual(self.as_user(self.admin).patch(f"/api/roles/{hr_role.id}/", {"permissions": codes}, format="json").status_code, 200)
+        self.assertNotIn("view_feedback", {p["code"] for p in self.access(self.admin, self.hr).data["permissions"]})
+        self.assertNotIn("view_feedback", self.as_user(self.hr).get("/api/me/").data["permissions"])
+        self.assertEqual(self.as_user(self.hr).get("/api/feedback/").status_code, 403)
+
+    def test_only_user_managers_may_look(self):
+        self.assertEqual(self.access(self.hr, self.fit_boss).status_code, 403)
 
 
 class CompanyAccountTests(EuclTestCase):
@@ -553,13 +905,13 @@ class CompanyAccountTests(EuclTestCase):
 
         response = self.as_user(self.admin).post(
             f"/api/companies/{company_id}/covered-services/",
-            {"services": [{"id": service.data["id"], "eucl_price": "5000"}]},
+            {"services": [{"id": service.data["id"]}]},
             format="json",
         )
         self.assertEqual(response.status_code, 200, response.data)
         sauna = Service.objects.get(pk=service.data["id"])
         self.assertTrue(sauna.is_approved)
-        self.assertEqual(sauna.eucl_price, Decimal("5000"))
+        self.assertEqual(sauna.eucl_price, Decimal("6000"))  # the company's price
 
     def test_login_details_are_required(self):
         response = self.new_company(account_username="", account_password="")
@@ -664,14 +1016,6 @@ class DeactivatedCompanyTests(EuclTestCase):
     def test_other_companies_are_not_affected(self):
         self.assertEqual(self.login("spa_desk").status_code, 200)
 
-    def test_staff_who_are_also_employees_keep_their_employee_access(self):
-        both = self.make_user("both", *DESK_ROLES, "EMPLOYEE", company=self.fitzone)
-        Employee.objects.create(user=both, phone="+250788000001", department="IT", position="Engineer")
-        me = self.as_user(both).get("/api/me/").data
-        self.assertIn("use_services", me["permissions"])
-        self.assertNotIn("record_visits", me["permissions"])
-        self.assertNotIn("record_visits", me["role_permissions"])
-
     def test_activating_again_gives_access_back(self):
         self.as_user(self.admin).post(f"/api/companies/{self.fitzone.id}/activate/")
         self.client.force_authenticate(None)
@@ -684,10 +1028,24 @@ class PageRoleTests(EuclTestCase):
     def staff(self, *roles):
         return self.make_user("desk_" + "_".join(r.lower() for r in roles)[:20], *roles, company=self.fitzone)
 
-    def test_the_page_roles_exist_and_the_old_receptionist_role_is_gone(self):
-        codes = set(Role.objects.filter(is_company_role=True).values_list("code", flat=True))
-        self.assertTrue(set(DESK_ROLES) <= codes)
-        self.assertNotIn("COMPANY_RECEPTIONIST", codes)
+    def test_the_three_built_in_roles(self):
+        def perms(code):
+            return set(Role.objects.get(code=code).permissions.values_list("code", flat=True))
+        self.assertEqual(perms("COMPANY_BOSS"), {
+            "view_company_dashboard", "record_visits", "take_attendance", "view_company_services",
+            "manage_company_services", "view_employees_attended", "view_company_visits", "manage_company_staff",
+            "view_company_feedback", "edit_service_prices"})
+        self.assertEqual(perms("COMPANY_RECEPTIONIST"), {
+            "view_company_dashboard", "record_visits", "take_attendance", "view_company_services", "view_employees_attended",
+            "edit_service_prices"})
+        self.assertTrue({"view_my_overview", "view_places", "view_my_services", "manage_employees", "import_employees"} <= perms("EUCL_HR"))
+        self.assertEqual(Role.objects.get(code="EUCL_HR").name, "HR")
+        self.assertEqual(Role.objects.get(code="COMPANY_RECEPTIONIST").name, "Receptionist")
+
+    def test_receptionist_cannot_see_payments_or_manage_staff(self):
+        self.assertEqual(self.as_user(self.fit_desk).get("/api/payments/").status_code, 403)
+        self.assertEqual(self.as_user(self.fit_desk).get("/api/users/").status_code, 403)
+        self.assertEqual(self.record(self.fit_desk, self.john, self.gym).status_code, 201)
 
     def test_record_visits_only(self):
         desk = self.staff("COMPANY_RECORD_VISITS")
@@ -716,12 +1074,10 @@ class PageRoleTests(EuclTestCase):
         self.assertEqual(len(today), 3)
         self.assertEqual(self.as_user(desk).get("/api/visits/by-employee/").status_code, 403)
 
-    def test_boss_has_every_page_except_attendance(self):
+    def test_boss_has_every_page_including_attendance(self):
         perms = set(self.as_user(self.fit_boss).get("/api/me/").data["permissions"])
         self.assertTrue({"view_company_dashboard", "record_visits", "view_company_services",
-                         "view_employees_attended"} <= perms)
-        # Employees attendance is the receptionist's page, not the boss's
-        self.assertNotIn("take_attendance", perms)
+                         "view_employees_attended", "take_attendance"} <= perms)
 
     def test_boss_gives_several_page_roles(self):
         response = self.as_user(self.fit_boss).post(
@@ -796,7 +1152,7 @@ class CompanyOwnRoleTests(EuclTestCase):
     def test_duplicate_name_in_the_same_company(self):
         self.create_role()
         self.assertEqual(self.create_role().status_code, 400)
-        self.assertEqual(self.create_role(name="Dashboard").status_code, 400)  # EUCL's shared role
+        self.assertEqual(self.create_role(name="Receptionist").status_code, 400)  # EUCL's shared role
 
 
 class OneCompanyPerDayTests(EuclTestCase):
@@ -853,7 +1209,7 @@ class ExportForMETests(EuclTestCase):
 
     def setUp(self):
         super().setUp()
-        self.sync = self.make_user("me_sync", "ME_SYNC")
+        self.sync = self.make_user("me_sync", "ME_OFFICER")  # M&E officers can export
         self.record(self.fit_desk, self.john, self.gym, self.pool)
         self.record(self.spa_desk, self.mary, self.massage)
 
@@ -913,4 +1269,197 @@ class ExportForMETests(EuclTestCase):
     def test_me_roles(self):
         self.assertIn("view_me_dashboards", self.as_user(self.hr).get("/api/me/").data["permissions"])
         officer = self.make_user("officer", "ME_OFFICER")
-        self.assertTrue({"view_me_dashboards", "manage_me_targets"} <= set(self.as_user(officer).get("/api/me/").data["permissions"]))
+        self.assertTrue({"view_me_dashboards", "manage_me_targets", "export_data"} <= set(self.as_user(officer).get("/api/me/").data["permissions"]))
+
+
+class PlatformDashboardTests(EuclTestCase):
+    """The EUCL dashboard lists companies with their id, so each one can be opened."""
+
+    def test_by_company_gives_the_company_id(self):
+        self.record(self.fit_desk, self.john, self.gym, self.pool)
+        rows = self.as_user(self.admin).get("/api/stats/", {"scope": "platform"}).data["by_company"]
+        self.assertEqual(rows[0]["company_id"], self.fitzone.id)
+        self.assertEqual(rows[0]["visits"], 2)
+        # ...and the company's services used, for one month
+        month = self.today.strftime("%Y-%m")
+        visits = self.as_user(self.admin).get(
+            "/api/visits/", {"company": self.fitzone.id, "date_from": f"{month}-01", "date_to": self.today.isoformat()}
+        ).data
+        self.assertEqual(sorted(v["service_name"] for v in visits), ["Gym", "Swimming"])
+
+
+class RolesAndPermissionsTests(EuclTestCase):
+    """The built-in roles, the Super admin role, and permissions the super admin adds."""
+
+    def test_employees_have_one_permission_per_page(self):
+        pages = {"view_my_overview", "view_places", "view_my_services"}
+        self.assertEqual(set(Role.objects.get(code="EMPLOYEE").permissions.values_list("code", flat=True)), pages)
+        self.assertFalse(Permission.objects.filter(code="use_services").exists())
+        # without "My services" or "Overview", an employee doesn't get their visits
+        role = Role.objects.get(code="EMPLOYEE")
+        role.permissions.set(Permission.objects.filter(code="view_places"))
+        self.assertEqual(self.as_user(self.john.user).get("/api/visits/").status_code, 403)
+
+    def test_the_built_in_roles(self):
+        built_in = set(Role.objects.filter(is_system=True).values_list("name", flat=True))
+        self.assertEqual(built_in, {"Super admin", "Company boss", "Receptionist", "HR", "M&E officer", "Employee"})
+        self.assertFalse(Role.objects.filter(code="ME_SYNC").exists())
+
+    def test_super_admin_switches_decide_what_super_admins_do(self):
+        role = Role.objects.get(code="SUPER_ADMIN")
+        self.assertEqual(role.permissions.count(), Permission.objects.count())  # everything to start with
+        # switch "Manage companies" off: super admins can no longer add companies
+        codes = [c for c in role.permissions.values_list("code", flat=True) if c != "manage_companies"]
+        self.assertEqual(self.as_user(self.admin).patch(f"/api/roles/{role.id}/", {"permissions": codes}, format="json").status_code, 200)
+        self.assertEqual(self.as_user(self.admin).post("/api/companies/", {"name": "X", "email": "x@x.test"}, format="json").status_code, 403)
+        self.assertNotIn("manage_companies", self.as_user(self.admin).get("/api/me/").data["permissions"])
+
+    def test_super_admin_can_switch_manage_users_off_and_on(self):
+        role = Role.objects.get(code="SUPER_ADMIN")
+        response = self.as_user(self.admin).patch(f"/api/roles/{role.id}/", {"permissions": ["view_places"]}, format="json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["permissions"], ["view_places"])
+        # Super admins no longer manage users & roles...
+        self.assertNotIn("manage_users", self.as_user(self.admin).get("/api/me/").data["permissions"])
+        self.assertEqual(self.as_user(self.admin).get("/api/roles/").status_code, 403)
+        # ...until it is switched back on (from the Django admin)
+        role.permissions.add(Permission.objects.get(code="manage_users"))
+        self.assertEqual(self.as_user(self.admin).get("/api/roles/").status_code, 200)
+
+    def test_super_admin_role_gives_no_employee_or_company_menus(self):
+        chief = User.objects.create_superuser("chief2", "c2@eucl.test", "x")
+        UserProfile.objects.create(user=chief).roles.add(Role.objects.get(code="SUPER_ADMIN"))
+        me = self.as_user(chief).get("/api/me/").data
+        self.assertEqual(me["role_permissions"], [])
+        self.assertIn("view_my_overview", me["permissions"])
+
+    def test_giving_the_super_admin_role_makes_a_super_admin(self):
+        response = self.as_user(self.admin).post("/api/users/", {
+            "username": "chief", "first_name": "C", "last_name": "H", "email": "chief@eucl.test",
+            "roles": ["SUPER_ADMIN"], "password": "Chief@Wellness26", "password_confirm": "Chief@Wellness26",
+        }, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        chief = User.objects.get(username="chief")
+        self.assertTrue(chief.is_superuser)
+        self.assertEqual(response.data["role_names"], ["Super admin"])
+        # taking the role away takes the super admin access away
+        self.as_user(self.admin).patch(f"/api/users/{chief.id}/", {"roles": ["EUCL_HR"]}, format="json")
+        chief.refresh_from_db()
+        self.assertFalse(chief.is_superuser)
+
+    def test_add_a_permission_and_give_it_to_a_role(self):
+        response = self.as_user(self.admin).post("/api/permissions/", {
+            "name": "Approve refunds", "description": "Approve refund requests", "area": "EUCL"}, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["code"], "approve_refunds")
+        self.assertFalse(response.data["is_builtin"])
+        self.assertTrue(Role.objects.get(code="SUPER_ADMIN").permissions.filter(code="approve_refunds").exists())
+        hr = Role.objects.get(code="EUCL_HR")
+        codes = list(hr.permissions.values_list("code", flat=True)) + ["approve_refunds"]
+        self.assertEqual(self.as_user(self.admin).patch(f"/api/roles/{hr.id}/", {"permissions": codes}, format="json").status_code, 200)
+        self.assertIn("approve_refunds", self.as_user(self.hr).get("/api/me/").data["permissions"])
+        # it can be deleted; built-in ones can't
+        self.assertEqual(self.as_user(self.admin).delete("/api/permissions/approve_refunds/").status_code, 204)
+        self.assertEqual(self.as_user(self.admin).delete("/api/permissions/view_places/").status_code, 400)
+
+    def test_only_the_super_admin_adds_permissions(self):
+        response = self.as_user(self.fit_boss).post("/api/permissions/", {"name": "X", "area": "Company"}, format="json")
+        self.assertEqual(response.status_code, 403)
+
+    def test_company_role_follows_its_permissions(self):
+        response = self.as_user(self.admin).post("/api/roles/", {"name": "Cashier", "permissions": []}, format="json")
+        role = Role.objects.get(pk=response.data["id"])
+        self.assertFalse(role.is_company_role)
+        # only company permissions -> a company role
+        self.as_user(self.admin).patch(f"/api/roles/{role.id}/", {"permissions": ["record_visits"]}, format="json")
+        role.refresh_from_db()
+        self.assertTrue(role.is_company_role)
+        # add an EUCL permission -> an EUCL role again
+        self.as_user(self.admin).patch(f"/api/roles/{role.id}/", {"permissions": ["record_visits", "manage_employees"]}, format="json")
+        role.refresh_from_db()
+        self.assertFalse(role.is_company_role)
+
+
+class FeedbackTests(EuclTestCase):
+    """Employees send optional feedback on services they used; HR, admin and the company see it."""
+
+    def setUp(self):
+        super().setUp()
+        self.record(self.fit_desk, self.john, self.gym)
+        self.visit = Visit.objects.get(employee=self.john, service=self.gym)
+
+    def send(self, user, **data):
+        return self.as_user(user).post(f"/api/visits/{self.visit.id}/feedback/", data, format="json")
+
+    def test_employee_sends_a_complaint(self):
+        response = self.send(self.john.user, kind="complaint", message="I did not attend: I was at work that day")
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["feedback_kind_label"], "Complaint")
+        self.assertIsNotNone(response.data["feedback_at"])
+
+    def test_only_comment_or_complaint_with_a_message(self):
+        self.assertEqual(self.send(self.john.user, kind="complaint").status_code, 400)
+        self.assertEqual(self.send(self.john.user, kind="not_attended", message="x").status_code, 400)
+        self.assertEqual(self.send(self.john.user, kind="comment", message="Great trainer").status_code, 200)
+
+    def test_only_the_employee_who_used_it(self):
+        self.assertEqual(self.send(self.mary.user, kind="complaint", message="x").status_code, 404)  # not in Mary's list
+        self.assertEqual(self.send(self.fit_desk, kind="complaint", message="x").status_code, 403)
+
+    def test_who_sees_it(self):
+        self.send(self.john.user, kind="complaint", message="The trainer was absent")
+        for user in (self.admin, self.hr, self.fit_boss):
+            data = self.as_user(user).get("/api/feedback/").data
+            self.assertEqual([row["feedback_message"] for row in data], ["The trainer was absent"], user.username)
+        # another company's boss doesn't
+        spa_boss = self.make_user("spa_boss", "COMPANY_BOSS", company=self.spa)
+        self.assertEqual(self.as_user(spa_boss).get("/api/feedback/").data, [])
+        # receptionists don't read feedback (only the boss does)
+        self.assertEqual(self.as_user(self.fit_desk).get("/api/feedback/").status_code, 403)
+        # and employees don't read the list
+        self.assertEqual(self.as_user(self.mary.user).get("/api/feedback/").status_code, 403)
+
+    def test_taking_it_back(self):
+        self.send(self.john.user, kind="comment", message="Great")
+        response = self.as_user(self.john.user).delete(f"/api/visits/{self.visit.id}/feedback/")
+        self.assertEqual(response.data["feedback_kind"], "")
+        self.assertEqual(self.as_user(self.hr).get("/api/feedback/").data, [])
+
+
+class PriceChangeTests(EuclTestCase):
+    """Admin and HR see who changed a service price (boss, receptionist…) and when."""
+
+    def test_the_boss_changes_a_price_and_hr_sees_who(self):
+        response = self.as_user(self.fit_boss).patch(f"/api/services/{self.gym.id}/", {"price": "3500"}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
+        changes = self.as_user(self.hr).get("/api/price-changes/").data
+        self.assertEqual(len(changes), 1)
+        change = changes[0]
+        self.assertEqual((change["service_name"], change["company_name"]), ("Gym", "FitZone"))
+        self.assertEqual((Decimal(change["old_price"]), Decimal(change["new_price"]), Decimal(change["difference"])),
+                         (Decimal("3000"), Decimal("3500"), Decimal("500")))
+        self.assertEqual(change["changed_by_username"], "fit_boss")
+        self.assertEqual(change["changed_by_roles"], "Company boss")
+
+    def test_a_receptionist_with_the_permission_is_named_too(self):
+        desk = self.make_user("desk_prices", "COMPANY_RECEPTIONIST", company=self.fitzone)
+        self.as_user(desk).patch(f"/api/services/{self.pool.id}/", {"price": "4500"}, format="json")
+        change = self.as_user(self.admin).get("/api/price-changes/", {"changed": "yes"}).data[0]
+        self.assertEqual((change["changed_by_username"], change["changed_by_roles"]), ("desk_prices", "Receptionist"))
+
+    def test_new_services_and_unchanged_prices(self):
+        self.as_user(self.fit_boss).post("/api/services/", {"name": "Yoga", "price": "4000"}, format="json")
+        self.as_user(self.fit_boss).patch(f"/api/services/{self.gym.id}/", {"description": "Morning classes"}, format="json")
+        changes = self.as_user(self.hr).get("/api/price-changes/").data
+        self.assertEqual([(c["service_name"], c["old_price"]) for c in changes], [("Yoga", None)])  # added, no old price
+        self.assertEqual(self.as_user(self.hr).get("/api/price-changes/", {"changed": "yes"}).data, [])
+
+    def test_hr_can_pick_a_company(self):
+        names = {c["name"] for c in self.as_user(self.hr).get("/api/companies/").data}
+        self.assertEqual(names, {"FitZone", "BlueSpa"})
+        self.assertEqual(self.as_user(self.hr).post("/api/companies/", {"name": "X", "email": "x@x.test"}, format="json").status_code, 403)
+
+    def test_only_admin_and_hr(self):
+        self.assertEqual(self.as_user(self.fit_boss).get("/api/price-changes/").status_code, 403)
+        self.assertEqual(self.as_user(self.fit_desk).get("/api/price-changes/").status_code, 403)
+        self.assertEqual(self.as_user(self.john.user).get("/api/price-changes/").status_code, 403)

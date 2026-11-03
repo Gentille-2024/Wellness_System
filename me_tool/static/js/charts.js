@@ -6,6 +6,7 @@
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   const palette = () => [1, 2, 3, 4, 5].map((i) => css(`--chart-${i}`));
   const rwf = (value) => `RWF ${Math.round(value).toLocaleString()}`;
+  const drawn = new Map(); // canvas -> Chart, so they can be redrawn in the other theme
 
   function build(canvas) {
     const source = document.getElementById(canvas.dataset.chart);
@@ -52,7 +53,8 @@
             : {}),
         };
 
-    new Chart(canvas, {
+    if (drawn.has(canvas)) drawn.get(canvas).destroy();
+    drawn.set(canvas, new Chart(canvas, {
       type: spec.type,
       data: { labels: spec.labels, datasets },
       options: {
@@ -74,7 +76,7 @@
         },
         scales: spec.horizontal && !isRound ? { x: scales.y, y: { ...scales.x, ticks: { color: text, autoSkip: false } } } : scales,
       },
-    });
+    }));
   }
 
   function init(root) {
@@ -90,4 +92,10 @@
     if (toggle) toggle.addEventListener("click", () => document.querySelector(".nav").classList.toggle("open"));
   });
   document.addEventListener("htmx:afterSwap", (event) => init(event.target));
+  document.addEventListener("themechange", () => {
+    drawn.forEach((chart, canvas) => {
+      if (canvas.isConnected) build(canvas);
+      else drawn.delete(canvas);
+    });
+  });
 })();

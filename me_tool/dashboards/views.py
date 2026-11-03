@@ -139,6 +139,8 @@ def company(request, company_id):
         "departments": metrics.by_department(month, scope),
         "indicators": rows,
         "indicator_summary": status_summary(rows),
+        # Names only for EUCL (super admin, M&E officer, HR), never for company staff
+        "who_came": metrics.who_came(month, scope) if request.access.can_see_names else None,
     })
 
 

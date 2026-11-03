@@ -1,7 +1,7 @@
 import { jsPDF } from 'jspdf'
 import { autoTable } from 'jspdf-autotable'
 import { formatDate, formatMoney, formatTime } from './format.js'
-import { statementRows } from './statement.js'
+import { statementRows, visitTotals } from './statement.js'
 
 const GREEN = [31, 122, 85]
 
@@ -34,6 +34,31 @@ export function exportVisitsPdf({ title, filtersText, rows, columns = {}, filena
   doc.setTextColor(107, 122, 115)
   doc.text(filtersText || 'All records', 40, 104)
 
+  // ---- summary: number of services, total, paid, unpaid
+  const totals = visitTotals(rows)
+  const boxes = [
+    ['Total services', String(totals.count)],
+    ['Total amount', formatMoney(totals.total)],
+    ['Paid', formatMoney(totals.paid)],
+    ['Unpaid', formatMoney(totals.unpaid)],
+  ]
+  const gap = 12
+  const boxWidth = (pageWidth - 80 - gap * (boxes.length - 1)) / boxes.length
+  boxes.forEach(([label, value], i) => {
+    const x = 40 + i * (boxWidth + gap)
+    doc.setFillColor(243, 246, 244)
+    doc.setDrawColor(227, 232, 229)
+    doc.roundedRect(x, 116, boxWidth, 48, 6, 6, 'FD')
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9)
+    doc.setTextColor(107, 122, 115)
+    doc.text(label, x + 12, 134)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(13)
+    doc.setTextColor(...(label === 'Unpaid' ? [180, 35, 24] : label === 'Paid' ? [23, 112, 63] : [21, 32, 27]))
+    doc.text(value, x + 12, 154)
+  })
+
   // ---- table
   const head = ['Date', 'Time']
   if (columns.employee !== false) head.push('Employee', 'Department')
@@ -48,14 +73,14 @@ export function exportVisitsPdf({ title, filtersText, rows, columns = {}, filena
     return row
   })
 
-  const total = rows.reduce((sum, visit) => sum + Number(visit.price), 0)
-  const unpaid = rows.filter((visit) => !visit.is_paid).reduce((sum, visit) => sum + Number(visit.price), 0)
-
   autoTable(doc, {
-    startY: 120,
+    startY: 180,
     head: [head],
     body,
-    foot: [[{ content: `${rows.length} visit${rows.length === 1 ? '' : 's'}   ·   Total ${formatMoney(total)}   ·   Unpaid ${formatMoney(unpaid)}`, colSpan: head.length }]],
+    foot: [[{
+      content: `${totals.count} service${totals.count === 1 ? '' : 's'}   ·   Total ${formatMoney(totals.total)}   ·   Paid ${formatMoney(totals.paid)}   ·   Unpaid ${formatMoney(totals.unpaid)}`,
+      colSpan: head.length,
+    }]],
     showFoot: 'lastPage', // totals once, at the end
     styles: { fontSize: 9, cellPadding: 5 },
     headStyles: { fillColor: GREEN, textColor: 255 },
@@ -102,7 +127,7 @@ export function exportEmployeeSummaryPdf({ title, filtersText, data, filename })
 
   autoTable(doc, {
     startY: 120,
-    head: [['Employee', 'Department', 'Services used', 'Visits', 'Days', 'Amount']],
+    head: [['Employee', 'Department', 'Services used', 'Total services', 'Days', 'Amount']],
     body: data.employees.map((row) => [
       `${row.employee_name} (${row.employee_code})`,
       row.department || '',
@@ -164,7 +189,7 @@ export function exportStatementPdf({ title, details, data, perCompany, filename 
   doc.setTextColor(107, 122, 115)
   details.forEach((line, index) => doc.text(line, 40, 104 + index * 14))
 
-  const head = [...(perCompany ? ['Company'] : []), 'Employee', 'Department', 'Visits', 'Amount']
+  const head = [...(perCompany ? ['Company'] : []), 'Employee', 'Department', 'Services', 'Amount']
   const amountCol = head.length - 1
   const rows = statementRows(data, { perCompany })
   const total = rows.pop()

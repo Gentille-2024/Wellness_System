@@ -8,7 +8,7 @@
     <h1>{{ company.name }}</h1>
     <p>
       {% if company.deleted_at %}<span class="badge">Deleted</span>{% elif not company.is_active %}<span class="badge at_risk">Deactivated</span>{% endif %}
-      EUCL employees' visits and what EUCL pays · {{ month.label }}
+      Services EUCL employees used and what EUCL pays · {{ month.label }}
     </p>
   </div>
   <div class="page-actions">
@@ -37,7 +37,7 @@
   <div class="kpi">
     <div class="kpi-label">Amount</div>
     <div class="kpi-value" title="{{ kpis.spend|rwf }}">{{ kpis.spend|rwf }}</div>
-    <div class="kpi-foot">{{ kpis.spend_change|change }} · {{ kpis.cost_per_visit|rwf }} per visit</div>
+    <div class="kpi-foot">{{ kpis.spend_change|change }} · {{ kpis.cost_per_visit|rwf }} per service</div>
   </div>
   <div class="kpi">
     <div class="kpi-label">EUCL still owes</div>
@@ -46,13 +46,37 @@
   </div>
 </div>
 
+{% if who_came is not None %}
+<div class="card card-flush" id="who-came">
+  <div class="card-head"><div><h2>Who came</h2><p>EUCL employees who used services here · {{ month.label }}</p></div></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Date</th><th>Time</th><th>Employee</th><th>Services</th><th class="num">Amount</th></tr></thead>
+      <tbody>
+      {% for v in who_came %}
+        <tr>
+          <td class="nowrap">{{ v.date|date:"j M Y" }}</td>
+          <td>{{ v.time|time:"H:i" }}</td>
+          <td><strong>{{ v.name }}</strong><br><span class="muted small">{{ v.code }}{% if v.department %} · {{ v.department }}{% endif %}</span></td>
+          <td>{{ v.services }}</td>
+          <td class="num">{{ v.amount|rwf }}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5" class="empty">Nobody used services here in this {{ month.unit }}.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 <div class="grid-2">
   <div class="card">
     <div class="card-head"><div><h2>Last {{ month.trend_count }} {{ month.unit }}s</h2><p>Services used and the amount</p></div></div>
     <div class="card-body"><div class="chart-box"><canvas data-chart="trend-chart"></canvas></div></div>
   </div>
   <div class="card">
-    <div class="card-head"><div><h2>Top services</h2><p>Visits this {{ month.unit }} and the previous {{ month.unit }}</p></div></div>
+    <div class="card-head"><div><h2>Top services</h2><p>Services used this {{ month.unit }} and the previous {{ month.unit }}</p></div></div>
     <div class="card-body"><div class="chart-box"><canvas data-chart="services-chart"></canvas></div></div>
   </div>
 </div>
@@ -63,7 +87,7 @@
   <div class="card-head" style="padding-top:4px"><div><h2>Service performance</h2><p>{{ month.label }}</p></div></div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Service</th><th>EUCL covers</th><th class="num">Visits</th><th class="num">Change</th><th class="num">Employees</th><th class="num">Amount</th><th>Share</th></tr></thead>
+      <thead><tr><th>Service</th><th>EUCL covers</th><th class="num">Services</th><th class="num">Change</th><th class="num">Employees</th><th class="num">Amount</th><th>Share</th></tr></thead>
       <tbody>
       {% for s in services %}
         <tr>
@@ -116,15 +140,15 @@
   {% endif %}
 
   <div class="card card-flush">
-    <div class="card-head" style="padding-top:4px"><div><h2>Visitors by department</h2><p>EUCL departments of the employees who came</p></div></div>
+    <div class="card-head" style="padding-top:4px"><div><h2>Employees by department</h2><p>EUCL departments of the employees who came</p></div></div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Department</th><th class="num">Employees who came</th><th class="num">Visits</th><th class="num">Amount</th></tr></thead>
+        <thead><tr><th>Department</th><th class="num">Employees who came</th><th class="num">Services</th><th class="num">Amount</th></tr></thead>
         <tbody>
         {% for d in departments %}{% if d.visits %}
           <tr><td>{{ d.department }}</td><td class="num">{{ d.participants }}</td><td class="num">{{ d.visits }}</td><td class="num">{{ d.spend|rwf }}</td></tr>
         {% endif %}{% empty %}
-          <tr><td colspan="4" class="empty">No visits in this {{ month.unit }}.</td></tr>
+          <tr><td colspan="4" class="empty">No services used in this {{ month.unit }}.</td></tr>
         {% endfor %}
         </tbody>
       </table>

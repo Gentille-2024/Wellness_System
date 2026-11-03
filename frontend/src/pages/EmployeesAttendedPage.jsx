@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react'
+import { useState } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import Icon from '../components/Icon'
 import { Alert, Avatar, Card, EmptyState, Field, FilterButton, Loading, PageHeader, SearchInput, SelectField, StatCard } from '../components/ui'
@@ -7,28 +7,37 @@ import useDebounced from '../hooks/useDebounced'
 import { formatDate, formatMoney, monthStartISO, todayISO } from '../utils/format'
 import { exportEmployeeSummaryExcel } from '../utils/statement'
 
-const EMPTY_FILTERS = { date_from: '', date_to: '', service: '' }
+const EMPTY_FILTERS = { date_from: '', date_to: '', company: '', service: '' }
 
 /**
- * Company staff (permission "See company visits & payments"):
- * every EUCL employee who came, the services they used, how many times,
+ * Every EUCL employee who came, the services they used, how many times,
  * the amount for each employee and the total for all of them.
+ * scope="company": company staff, their own company only ("See employees attended").
+ * scope="eucl":    EUCL HR, every company, with a company filter
+ *                  ("See employees attended (all companies)").
  */
-export default function EmployeesAttendedPage() {
+export default function EmployeesAttendedPage({ scope = 'company' }) {
   const { user } = useAuth()
-  const companyId = user.company?.id
+  const eucl = scope === 'eucl'
 
   const [search, setSearch] = useState('')
   const [filters, setFilters] = useState({ ...EMPTY_FILTERS, date_from: monthStartISO(), date_to: todayISO() })
-  const [open, setOpen] = useState(null) // employee id whose visits are shown
   const debouncedSearch = useDebounced(search)
+  // EUCL: the company chosen in the filter (or every company); staff: their own
+  const companyId = eucl ? filters.company : user.company?.id
 
   const report = useApi('/visits/by-employee/', { ...filters, company: companyId, search: debouncedSearch })
-  const services = useApi('/services/', { company: companyId })
-  // The individual visits of the employee that is opened
-  const visits = useApi(open ? '/visits/' : null, { ...filters, company: companyId, employee: open })
+  const companies = useApi(eucl ? '/companies/' : null, { status: 'current' })
+  // Services are per company, so EUCL picks a company before a service
+  const services = useApi(companyId ? '/services/' : null, { company: companyId })
+  const companyList = companies.data?.results ?? companies.data ?? []
+  const companyName = eucl ? companyList.find((c) => String(c.id) === String(filters.company))?.name : user.company?.name
 
-  const changeFilter = (event) => setFilters((prev) => ({ ...prev, [event.target.name]: event.target.value }))
+  const changeFilter = (event) => {
+    const { name, value } = event.target
+    // A different company has different services
+    setFilters((prev) => ({ ...prev, [name]: value, ...(name === 'company' ? { service: '' } : {}) }))
+  }
   const activeCount = Object.values(filters).filter(Boolean).length
 
   const data = report.data ?? { employees: [], totals: { employees: 0, visits: 0, amount: 0 } }
@@ -38,6 +47,7 @@ export default function EmployeesAttendedPage() {
     if (filters.date_from || filters.date_to) {
       parts.push(`${filters.date_from ? formatDate(filters.date_from) : 'start'} to ${filters.date_to ? formatDate(filters.date_to) : 'today'}`)
     }
+    if (eucl && filters.company) parts.push(companyName)
     if (filters.service) parts.push(services.data?.find((s) => String(s.id) === filters.service)?.name)
     if (search) parts.push(`Search: "${search}"`)
     return parts.filter(Boolean).join('  ·  ')
@@ -49,7 +59,7 @@ export default function EmployeesAttendedPage() {
   const exportAs = async (format) => {
     setExporting(format)
     setExportError('')
-    const title = `EUCL employees attended — ${user.company?.name}`
+    const title = `EUCL employees attended — ${companyName || 'all companies'}`
     const name = `employees-attended-${todayISO()}`
     try {
       if (format === 'pdf') {
@@ -70,7 +80,11 @@ export default function EmployeesAttendedPage() {
     <>
       <PageHeader
         title="Employees attended"
-        subtitle={`Every EUCL employee who used services at ${user.company?.name}, what they used, and the amount.`}
+        subtitle={
+          eucl
+            ? `Every EUCL employee who used services at ${companyName || 'any partner company'}, what they used, where, and the amount.`
+            : `Every EUCL employee who used services at ${user.company?.name}, what they used, and the amount.`
+        }
         actions={
           <>
             <button type="button" className="btn btn-secondary" onClick={() => exportAs('pdf')} disabled={!data.employees.length || Boolean(exporting)}>
@@ -97,14 +111,26 @@ export default function EmployeesAttendedPage() {
               <Field label="From" type="date" name="date_from" value={filters.date_from} max={filters.date_to || undefined} onChange={changeFilter} />
               <Field label="To" type="date" name="date_to" value={filters.date_to} min={filters.date_from || undefined} onChange={changeFilter} />
             </div>
-            <SelectField label="Service" name="service" value={filters.service} onChange={changeFilter}>
-              <option value="">All services</option>
-              {(services.data ?? []).map((service) => (
-                <option key={service.id} value={service.id}>
-                  {service.name}
-                </option>
-              ))}
-            </SelectField>
+            {eucl && (
+              <SelectField label="Company" name="company" value={filters.company} onChange={changeFilter}>
+                <option value="">All companies</option>
+                {companyList.map((company) => (
+                  <option key={company.id} value={company.id}>
+                    {company.name}
+                  </option>
+                ))}
+              </SelectField>
+            )}
+            {companyId && (
+              <SelectField label="Service" name="service" value={filters.service} onChange={changeFilter}>
+                <option value="">All services</option>
+                {(services.data?.results ?? services.data ?? []).map((service) => (
+                  <option key={service.id} value={service.id}>
+                    {service.name}
+                  </option>
+                ))}
+              </SelectField>
+            )}
           </FilterButton>
         </div>
 
@@ -118,82 +144,40 @@ export default function EmployeesAttendedPage() {
                 <tr>
                   <th>Employee</th>
                   <th>Services used</th>
-                  <th className="num">Visits</th>
+                  <th className="num">Total services</th>
                   <th className="num">Days</th>
                   <th className="num">Amount</th>
-                  <th className="actions-col" aria-label="Details" />
                 </tr>
               </thead>
               <tbody>
                 {data.employees.map((row) => (
-                  <Fragment key={row.employee}>
-                    <tr>
-                      <td>
-                        <div className="cell-person">
-                          <Avatar name={row.employee_name} size={32} />
-                          <div>
-                            <div className="cell-main">{row.employee_name}</div>
-                            <div className="cell-sub">
-                              {row.employee_code} · {row.department}
-                            </div>
+                  <tr key={row.employee}>
+                    <td>
+                      <div className="cell-person">
+                        <Avatar name={row.employee_name} size={32} />
+                        <div>
+                          <div className="cell-main">{row.employee_name}</div>
+                          <div className="cell-sub">
+                            {row.employee_code} · {row.department}
                           </div>
                         </div>
-                      </td>
-                      <td>
-                        <div className="service-chips">
-                          {row.services.map((service) => (
-                            <span key={service.service} className="service-chip">
-                              {service.service} <strong>×{service.count}</strong>
-                              <span className="muted"> {formatMoney(service.amount)}</span>
-                            </span>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="service-chips">
+                        {row.services.map((service) => (
+                          <span key={`${service.company}-${service.service}`} className="service-chip">
+                            {service.service}
+                            {eucl && !filters.company && <span className="muted"> · {service.company}</span>} <strong>×{service.count}</strong>
+                            <span className="muted"> {formatMoney(service.amount)}</span>
+                          </span>
                           ))}
                         </div>
                       </td>
                       <td className="num">{row.visits}</td>
                       <td className="num">{row.days}</td>
                       <td className="num cell-main">{formatMoney(row.total)}</td>
-                      <td className="actions-col">
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => setOpen(open === row.employee ? null : row.employee)}
-                          aria-expanded={open === row.employee}
-                        >
-                          {open === row.employee ? 'Hide' : 'Visits'}
-                        </button>
-                      </td>
                     </tr>
-                    {open === row.employee && (
-                      <tr className="detail-row">
-                        <td colSpan={6}>
-                          {visits.loading ? (
-                            <Loading />
-                          ) : (
-                            <table className="table inner-table">
-                              <thead>
-                                <tr>
-                                  <th>Date</th>
-                                  <th>Service</th>
-                                  <th className="num">Amount</th>
-                                  <th>Recorded by</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {(visits.data ?? []).map((visit) => (
-                                  <tr key={visit.id}>
-                                    <td>{formatDate(visit.visit_date)}</td>
-                                    <td>{visit.service_name}</td>
-                                    <td className="num">{formatMoney(visit.price)}</td>
-                                    <td>{visit.recorded_by_name ?? '—'}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          )}
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
                 ))}
               </tbody>
               <tfoot>
@@ -205,7 +189,6 @@ export default function EmployeesAttendedPage() {
                   <td className="num">{data.totals.visits}</td>
                   <td />
                   <td className="num cell-main">{formatMoney(data.totals.amount)}</td>
-                  <td />
                 </tr>
               </tfoot>
             </table>

@@ -51,12 +51,14 @@ Docker: `docker compose up -d --build` (web on :8100), `docker compose exec web 
 
 ## Wellness system architecture
 
-**Permissions, not roles, drive everything.** `wellness/permissions.py` holds the canonical `PERMISSIONS` list (code, name, description, area). Roles are DB rows bundling permissions, created by the super admin in the app; a user may have several. Never check role names in code.
+**Permissions, not roles, drive everything.** `wellness/permissions.py` holds the canonical `PERMISSIONS` list (code, name, description, area). Roles are DB rows bundling permissions, created by the super admin in the app; a user has exactly one role (enforced in `UserAccountSerializer.validate`). Never check role names in code.
 - Backend: the global DRF permission class `PermissionRequired` reads `read_perms` / `write_perms` / `open_read` attributes declared on each view. Superusers bypass it.
 - Row-level visibility is done in each viewset's `get_queryset` (e.g. `visits_for(user)` in `wellness/views.py` unions what each permission allows: all visits / own company's / own visits). `filter_visits` holds the shared query-param filters used by lists, stats and exports.
 - Adding a permission: add it to `PERMISSIONS`, add a data migration that creates it (see existing migrations such as `0014`/`0016`), and mirror it in the frontend (`src/auth/access.js`, `src/navigation.js`, routes in `src/App.jsx`).
 - Company roles (`Role.is_company_role`) stop counting while the user's company is deactivated (`active_roles`); such users get a 403 with `code: "company_deactivated"`, which the frontend axios client turns into a forced sign-out with a notice.
 - Companies are never erased: `is_active=False` = deactivated (paused), `deleted_at` set = archived. Both are reversible.
+- EUCL pays the company's own price: `Service.eucl_price` only mirrors `price` for covered services (kept for the M&E sync). On screen, visits are called "services" (Record services, Services, Usage records); code, URLs and API names still say `visit`.
+- Light/dark: `<html data-theme>` set by an inline script in `frontend/index.html` (toggle: `components/ThemeToggle.jsx`) and by `me_tool/static/js/theme.js`; dark tokens live under `:root[data-theme='dark']`.
 - `Visit` copies `company` and `price` at record time so history survives price/name changes; one visit per employee+service+day (DB constraint). `Visit.updated_at` is indexed and exists for the M&E incremental sync — keep it `auto_now`.
 
 **Frontend:** `src/api/client.js` is the only HTTP layer (JWT in localStorage, single-flight token refresh on 401, `errorMessage`/`parseErrors` to map DRF errors to forms). `can(user, ...perms)` treats superusers as having everything, but company and employee pages check `user.role_permissions` (the `exact` prop on `<Allow>` / `ProtectedRoute`) so a super admin does not see company/employee areas. The app has three areas — `/eucl`, `/company`, `/my-wellness` — and `homeFor(user)` picks the landing page.

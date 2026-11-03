@@ -4,11 +4,16 @@ from django.db.models import Q
 from django.utils import timezone
 
 
+def display_name(user):
+    """Names are shown family name first, as in Rwanda: "NATUKUNDA Charlotte"."""
+    return f"{user.last_name} {user.first_name}".strip()
+
+
 # =====================================================================
 #  Roles & permissions
 #  A Permission is one thing the app can check ("record_visits").
 #  A Role is a named bundle of permissions that the super admin can
-#  create and change from the app. A user can have several roles.
+#  create and change from the app. A user has exactly one role.
 # =====================================================================
 
 class Permission(models.Model):
@@ -17,6 +22,9 @@ class Permission(models.Model):
     description = models.CharField(max_length=255, blank=True)
     # Groups the permissions on screen: "Platform", "EUCL", "Company", "Employee"
     area = models.CharField(max_length=20)
+    # Built-in permissions are checked by the code. The super admin can add
+    # more; those are labels until a developer makes a page check them.
+    is_builtin = models.BooleanField(default=True)
 
     class Meta:
         ordering = ["area", "name"]
@@ -26,9 +34,13 @@ class Permission(models.Model):
 
 
 class Role(models.Model):
-    # System roles (created by the migration) can't be deleted
+    # System roles (created by the migrations) can't be deleted
     EMPLOYEE = "EMPLOYEE"
+    SUPER_ADMIN = "SUPER_ADMIN"  # every permission; goes with the super admin switch
+    ME_OFFICER = "ME_OFFICER"
     COMPANY_BOSS = "COMPANY_BOSS"  # given to the login created with a new company
+    RECEPTIONIST = "COMPANY_RECEPTIONIST"
+    HR = "EUCL_HR"  # given automatically to employees of the HR department
 
     code = models.CharField(max_length=50, unique=True)
     # Unique among the roles one company can see (checked by the serializer):
@@ -156,6 +168,30 @@ class Service(models.Model):
         return f"{self.name} ({self.company})"
 
 
+class PriceChange(models.Model):
+    """
+    Every time a service gets a price (added) or a new price, who did it.
+    The person's name and roles are copied at that moment, so the history
+    stays right even if their roles change later.
+    """
+
+    service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name="price_changes")
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="price_changes")
+    old_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)  # empty: service added
+    new_price = models.DecimalField(max_digits=12, decimal_places=2)
+    changed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    changed_by_name = models.CharField(max_length=310, blank=True)
+    changed_by_username = models.CharField(max_length=150, blank=True)
+    changed_by_roles = models.CharField(max_length=255, blank=True)  # e.g. "Company boss"
+    changed_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-changed_at", "-id"]
+
+    def __str__(self):
+        return f"{self.service}: {self.old_price} -> {self.new_price}"
+
+
 # =====================================================================
 #  EUCL employees and their visits
 # =====================================================================
@@ -164,21 +200,44 @@ class Employee(models.Model):
     """An EUCL employee who can use the services."""
 
     user = models.OneToOneField(User, on_delete=models.CASCADE)
-    employee_id = models.CharField(max_length=20, unique=True, blank=True)
+    # Given by HR (no automatic numbering); also the login username for
+    # employees uploaded from Excel
+    employee_id = models.CharField(max_length=20, unique=True)
     phone = models.CharField(max_length=20, blank=True)
     department = models.CharField(max_length=100, blank=True)
     position = models.CharField(max_length=100, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    def save(self, *args, **kwargs):
-        if not self.employee_id:
-            last = Employee.objects.order_by("-id").first()
-            number = int(last.employee_id.replace("EMP", "")) + 1 if last and last.employee_id else 1
-            self.employee_id = f"EMP{number:04d}"
-        super().save(*args, **kwargs)
+    # Employees of this department get the HR role automatically
+    HR_DEPARTMENT = "HR"
+
+    @property
+    def is_hr(self):
+        return self.department.strip().upper() == self.HR_DEPARTMENT
+
+    def sync_hr_role(self):
+        """
+        One role per person: an employee of the HR department gets HR instead of
+        Employee, and goes back to Employee when they leave HR. Any other role
+        the super admin gave them (M&E officer, Super admin...) is left alone.
+        """
+        profile = UserProfile.objects.filter(user=self.user).first()
+        hr = Role.objects.filter(code=Role.HR).first()
+        employee = Role.objects.filter(code=Role.EMPLOYEE).first()
+        if profile is None or hr is None or employee is None:
+            return
+        codes = set(profile.roles.values_list("code", flat=True))
+        if self.is_hr and codes <= {Role.EMPLOYEE}:
+            profile.roles.set([hr])
+        elif not self.is_hr and codes == {Role.HR}:
+            profile.roles.set([employee])
 
     def __str__(self):
-        return f"{self.user.get_full_name()} - {self.employee_id}"
+        return f"{self.name} - {self.employee_id}"
+
+    @property
+    def name(self):
+        return display_name(self.user)
 
 
 class Payment(models.Model):
@@ -224,6 +283,18 @@ class Visit(models.Model):
     # Changes whenever the visit changes (e.g. when it is paid): the M&E tool
     # syncs only the visits changed since its last sync
     updated_at = models.DateTimeField(auto_now=True, db_index=True)
+
+    # Optional feedback from the employee about this service (seen by HR,
+    # the super admin and the company's boss and receptionists)
+    FEEDBACK_COMMENT = "comment"
+    FEEDBACK_COMPLAINT = "complaint"
+    FEEDBACK_KINDS = [
+        (FEEDBACK_COMMENT, "Comment"),
+        (FEEDBACK_COMPLAINT, "Complaint"),
+    ]
+    feedback_kind = models.CharField(max_length=20, choices=FEEDBACK_KINDS, blank=True)
+    feedback_message = models.TextField(blank=True)
+    feedback_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-visited_at"]

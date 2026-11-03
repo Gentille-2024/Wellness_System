@@ -19,28 +19,28 @@ export default function CompanyDashboard() {
     <>
       <PageHeader
         title={data.company.name}
-        subtitle={data.company.is_active ? 'EUCL employees’ visits and what EUCL owes you.' : 'This company is deactivated: no new visits can be recorded.'}
+        subtitle={data.company.is_active ? 'Services EUCL employees used and what EUCL owes you.' : 'This company is deactivated: no new services can be recorded.'}
         actions={
           canRecord && (
             <Link to="/company/record" className="btn btn-primary">
-              Record visits
+              Record services
             </Link>
           )
         }
       />
 
       <div className="stat-grid">
-        <StatCard label="Visits today" value={data.visits_today} hint={`${data.visits_this_month} this month`} icon="checkin" />
+        <StatCard label="Services today" value={data.visits_today} hint={`${data.visits_this_month} this month`} icon="checkin" />
         <StatCard label="Employees attended" value={data.employees_today} hint={`${data.employees_this_month} this month · ${data.employees_total} in total`} icon="users" tone="info" />
         <StatCard label="Amount this month" value={formatMoney(data.amount_this_month)} icon="money" tone="success" />
         <StatCard label="Owed by EUCL" value={formatMoney(data.unpaid)} hint={`${formatMoney(data.paid)} paid so far`} icon="card" tone="danger" />
-        <StatCard label="Services for EUCL" value={data.services} hint={data.services_waiting ? `${data.services_waiting} not covered by EUCL` : `${data.total_visits} visits in total`} icon="sparkles" tone="info" />
+        <StatCard label="Services for EUCL" value={data.services} hint={data.services_waiting ? `${data.services_waiting} not covered by EUCL` : `${data.total_visits} services used in total`} icon="sparkles" tone="info" />
       </div>
 
       <div className="grid-2-1">
         <Card
           title="Payment amount per service"
-          subtitle="All visits so far"
+          subtitle="All services used so far"
           flush
           actions={
             <Link to="/company/payments" className="btn btn-ghost btn-sm">
@@ -54,8 +54,8 @@ export default function CompanyDashboard() {
                 <thead>
                   <tr>
                     <th>Service</th>
-                    <th className="num">EUCL pays now</th>
-                    <th className="num">Visits</th>
+                    <th className="num">Price now</th>
+                    <th className="num">Times used</th>
                     <th className="num">Total</th>
                     <th className="num">Paid</th>
                     <th className="num">Owed</th>
@@ -86,13 +86,13 @@ export default function CompanyDashboard() {
               </table>
             </div>
           ) : (
-            <EmptyState icon="money" title="No visits yet">
-              Amounts appear here once visits are recorded.
+            <EmptyState icon="money" title="No services used yet">
+              Amounts appear here once services are recorded.
             </EmptyState>
           )}
         </Card>
 
-        <Card title="Visits" subtitle="Last 14 days">
+        <Card title="Services" subtitle="Last 14 days">
           <DailyChart days={data.daily} />
         </Card>
       </div>

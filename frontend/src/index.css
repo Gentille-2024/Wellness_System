@@ -1,7 +1,7 @@
 /* =====================================================================
    Wellness Management System – design system
    Colours, spacing and components are defined once here and reused by
-   every page. Dark mode swaps the colour tokens only.
+   every page. Dark mode (html[data-theme='dark']) swaps the colour tokens only.
    ===================================================================== */
 
 :root {
@@ -53,41 +53,81 @@
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0c1210;
-    --surface: #141c18;
-    --surface-2: #18221d;
-    --border: #25312b;
-    --border-strong: #33423a;
-    --text: #e4ece8;
-    --text-2: #b5c3bc;
-    --muted: #8a9a93;
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0c1210;
+  --surface: #141c18;
+  --surface-2: #18221d;
+  --border: #25312b;
+  --border-strong: #33423a;
+  --text: #e4ece8;
+  --text-2: #b5c3bc;
+  --muted: #8a9a93;
 
-    --primary: #3daf7c;
-    --primary-hover: #4fc28e;
-    --primary-soft: rgba(61, 175, 124, 0.14);
-    --primary-ink: #7fd8ab;
-    --focus: rgba(61, 175, 124, 0.35);
+  --primary: #3daf7c;
+  --primary-hover: #4fc28e;
+  --primary-soft: rgba(61, 175, 124, 0.14);
+  --primary-ink: #7fd8ab;
+  --focus: rgba(61, 175, 124, 0.35);
 
-    --sidebar-bg: #09100d;
+  --sidebar-bg: #09100d;
 
-    --success-bg: rgba(52, 199, 116, 0.14);
-    --success: #6fdc9d;
-    --warning-bg: rgba(245, 166, 35, 0.14);
-    --warning: #f3bd62;
-    --danger-bg: rgba(240, 82, 72, 0.15);
-    --danger: #ff8b82;
-    --info-bg: rgba(90, 145, 255, 0.15);
-    --info: #9bbcff;
-    --neutral-bg: rgba(255, 255, 255, 0.07);
-    --neutral: #b5c3bc;
+  --success-bg: rgba(52, 199, 116, 0.14);
+  --success: #6fdc9d;
+  --warning-bg: rgba(245, 166, 35, 0.14);
+  --warning: #f3bd62;
+  --danger-bg: rgba(240, 82, 72, 0.15);
+  --danger: #ff8b82;
+  --info-bg: rgba(90, 145, 255, 0.15);
+  --info: #9bbcff;
+  --neutral-bg: rgba(255, 255, 255, 0.07);
+  --neutral: #b5c3bc;
 
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-lg: 0 20px 45px rgba(0, 0, 0, 0.55);
-  }
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 20px 45px rgba(0, 0, 0, 0.55);
+}
+
+:root[data-theme='ocean'] {
+  /* Ocean: deep navy with sky-blue accents (a calm dark theme) */
+  color-scheme: dark;
+  --bg: #0a1322;
+  --surface: #101c31;
+  --surface-2: #14223b;
+  --border: #21314d;
+  --border-strong: #2d4064;
+  --text: #e5edfa;
+  --text-2: #b6c5df;
+  --muted: #8495b4;
+
+  --primary: #2f7fd0;
+  --primary-hover: #3d8fe2;
+  --primary-soft: rgba(56, 152, 236, 0.16);
+  --primary-ink: #8cc4ff;
+  --focus: rgba(56, 152, 236, 0.38);
+
+  --sidebar-bg: #060e1c;
+  --sidebar-text: #c3d1ea;
+  --sidebar-muted: #7f91b3;
+  --sidebar-hover: rgba(140, 196, 255, 0.07);
+  --sidebar-active: rgba(56, 152, 236, 0.18);
+  --sidebar-accent: #8cc4ff;
+
+  --success-bg: rgba(45, 212, 191, 0.14);
+  --success: #5eead4;
+  --warning-bg: rgba(251, 191, 36, 0.14);
+  --warning: #fcd34d;
+  --danger-bg: rgba(248, 113, 113, 0.15);
+  --danger: #fca5a5;
+  --info-bg: rgba(129, 140, 248, 0.16);
+  --info: #a5b4fc;
+  --neutral-bg: rgba(255, 255, 255, 0.07);
+  --neutral: #b6c5df;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 20px 45px rgba(0, 0, 0, 0.6);
 }
 
 * {
@@ -1680,6 +1720,15 @@ fieldset.field legend {
   background: var(--primary-soft);
 }
 
+.checkbox-card.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.checkbox-card.disabled:hover {
+  border-color: var(--border-strong);
+}
+
 .checkbox-card input {
   width: 18px;
   height: 18px;
@@ -1819,7 +1868,7 @@ fieldset.field legend {
   gap: 8px;
 }
 
-/* ================================================= Record visits */
+/* ================================================= Record services */
 
 .pick-list {
   list-style: none;
@@ -2042,7 +2091,7 @@ fieldset.field legend {
   margin-bottom: 0;
 }
 
-/* Company form: 6 columns (service, price, description, covers, EUCL pays, remove) */
+/* Company form: service rows */
 .service-row {
   grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.8fr) minmax(0, 1.3fr) auto minmax(0, 0.8fr) auto;
 }
@@ -2389,4 +2438,454 @@ fieldset.field legend {
 
 .login-brand .brand-block {
   padding-left: 0;
+}
+
+/* ---- Theme switch: light (sun), dark (moon), ocean (wave) ------------ */
+.theme-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.theme-option {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 30px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.theme-option:hover {
+  color: var(--text);
+}
+
+.theme-option.active {
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+}
+
+.theme-option:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus);
+}
+
+.topbar .theme-switch {
+  margin-left: 12px;
+}
+
+.login-theme {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 40;
+}
+
+@media (max-width: 960px) {
+  /* The date is hidden on small screens: keep the switch on the right */
+  .topbar .theme-switch {
+    margin-left: auto;
+  }
+}
+
+/* A toolbar of labelled fields: line the buttons up with the inputs */
+.toolbar-end {
+  align-items: flex-end;
+}
+
+/* A table row that opens a page when clicked */
+.row-link {
+  cursor: pointer;
+}
+
+.row-link:hover td {
+  background: var(--surface-2);
+}
+
+/* Password with an eye button to show what was typed */
+.password-field {
+  position: relative;
+  display: block;
+}
+
+.password-field input {
+  width: 100%;
+  padding-right: 44px;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.password-toggle:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.password-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus);
+}
+
+/* Services & prices: fixed column widths so headings sit over their values */
+.services-table {
+  table-layout: fixed;
+  /* the fixed columns take 750px: leave the service name at least 220px,
+     and let the table scroll sideways on smaller screens */
+  min-width: 970px;
+}
+
+.services-table .col-check { width: 60px; }
+.services-table .col-price { width: 130px; }
+.services-table .col-cover { width: 170px; }
+.services-table .col-used { width: 110px; }
+.services-table .col-offered { width: 110px; }
+.services-table .col-actions { width: 170px; }
+
+.services-table th.center,
+.services-table td.center {
+  text-align: center;
+}
+
+.services-table .actions-col {
+  width: auto;
+}
+
+.services-table th.actions-col {
+  text-align: right;
+}
+
+.services-table td.actions-col .row-actions {
+  justify-content: flex-end;
+}
+
+.services-table .cell-main,
+.services-table .cell-sub {
+  overflow-wrap: anywhere;
+}
+
+/* "First time here? Create your account" under the sign-in button */
+.login-switch {
+  margin: 18px 0 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.login-switch a {
+  font-weight: 600;
+}
+
+/* ---- Users & roles → Roles: role list + permission switches ---------- */
+.roles-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.roles-layout > .card {
+  margin-bottom: 0;
+}
+
+.role-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+}
+
+.role-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.role-item:hover {
+  background: var(--surface-2);
+}
+
+.role-item.active {
+  background: var(--primary-soft);
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
+.role-item-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.role-item-count {
+  min-width: 28px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--neutral-bg);
+  color: var(--neutral);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.role-note {
+  margin: 0;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--info-bg);
+  color: var(--info);
+  font-size: 14px;
+}
+
+/* One category: a heading, then "All", then each permission */
+.permission-group {
+  padding: 16px 20px 4px;
+}
+
+.permission-group + .permission-group {
+  border-top: 1px solid var(--border);
+}
+
+.permission-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.permission-group-head h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--primary-ink);
+}
+
+.permission-group-head .muted {
+  font-size: 13px;
+}
+
+.permission-group .switch-list {
+  margin-bottom: 14px;
+}
+
+.permission-group .switch-row-all .checkbox-title {
+  font-weight: 700;
+}
+
+.switch-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.switch-row .checkbox-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.switch:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.card-header-bar .page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 900px) {
+  .roles-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* The role list stays in view while scrolling through the permissions */
+@media (min-width: 901px) {
+  .roles-layout > .card:first-child {
+    position: sticky;
+    top: 80px;
+  }
+}
+
+/* HR upload: one line per problem ("Row 3: invalid email …") */
+.import-errors {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+}
+
+.import-errors li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 20px;
+  border-top: 1px solid var(--border);
+  color: var(--text);
+}
+
+.import-errors li:first-child {
+  border-top: 0;
+}
+
+.import-errors svg {
+  flex-shrink: 0;
+  color: var(--danger);
+  position: relative;
+  top: 2px;
+}
+
+/* ---- Feedback ------------------------------------------------------- */
+.choice-list {
+  display: grid;
+  gap: 8px;
+}
+
+.choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.choice.active {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.choice input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 3px 0 0;
+  padding: 0;
+  accent-color: var(--primary);
+}
+
+.choice > span {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  text-align: left;
+}
+
+.feedback-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.feedback-pill .muted {
+  font-size: 13px;
+  text-decoration: underline;
+}
+
+.feedback-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.feedback-list li {
+  display: flex;
+  gap: 12px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+}
+
+.feedback-list li:first-child {
+  border-top: 0;
+}
+
+.feedback-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.feedback-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.feedback-message {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--border-strong);
+  background: var(--surface-2);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  white-space: pre-wrap;
+}
+
+/* A menu link to another website (the M&E tool) */
+.nav-external {
+  margin-left: auto;
+  opacity: 0.6;
+  font-size: 13px;
+}
+
+.text-success {
+  color: var(--success);
+}
+
+/* Users & roles: what one login can do, and which role gives each permission */
+.access-roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  margin: 12px 0 20px;
+}
+.access-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.access-sources {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
 }

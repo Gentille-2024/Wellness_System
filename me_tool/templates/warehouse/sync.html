@@ -10,7 +10,7 @@
   <form method="post" action="{% url 'warehouse:sync-now' %}" class="page-actions">
     {% csrf_token %}
     <button class="btn btn-primary" type="submit">Sync now</button>
-    <button class="btn" type="submit" name="full" value="1" title="Read every visit again">Full sync</button>
+    <button class="btn" type="submit" name="full" value="1" title="Read every service used again">Full sync</button>
   </form>
 </div>
 

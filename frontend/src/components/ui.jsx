@@ -139,10 +139,14 @@ export function SearchInput({ value, onChange, placeholder = 'Search…', autoFo
   )
 }
 
-// Several tick boxes where any number can be chosen (e.g. a user's roles)
-export function CheckboxGroup({ label, options, value, onChange, error, hint }) {
-  const toggle = (optionValue) =>
-    onChange(value.includes(optionValue) ? value.filter((item) => item !== optionValue) : [...value, optionValue])
+// Tick boxes where any number can be chosen.
+// single: only one option can be chosen (radio buttons); value stays an array.
+// An option with `disabled` is shown but can't be chosen.
+export function CheckboxGroup({ label, options, value, onChange, error, hint, single = false, name }) {
+  const toggle = (optionValue) => {
+    if (single) onChange([optionValue])
+    else onChange(value.includes(optionValue) ? value.filter((item) => item !== optionValue) : [...value, optionValue])
+  }
 
   return (
     <fieldset className="field checkbox-group">
@@ -153,20 +157,26 @@ export function CheckboxGroup({ label, options, value, onChange, error, hint }) 
         </legend>
       )}
       <div className="checkbox-options">
-        {options.map((option) => (
-          <label key={option.value} className={value.includes(option.value) ? 'checkbox-card checked' : 'checkbox-card'}>
-            <input
-              type="checkbox"
-              checked={value.includes(option.value)}
-              onChange={() => toggle(option.value)}
-              aria-label={option.label}
-            />
-            <span>
-              <span className="checkbox-title">{option.label}</span>
-              {option.description && <span className="checkbox-description">{option.description}</span>}
-            </span>
-          </label>
-        ))}
+        {options.map((option) => {
+          const checked = value.includes(option.value)
+          const classes = ['checkbox-card', checked && 'checked', option.disabled && 'disabled'].filter(Boolean).join(' ')
+          return (
+            <label key={option.value} className={classes}>
+              <input
+                type={single ? 'radio' : 'checkbox'}
+                name={single ? name || label : undefined}
+                checked={checked}
+                disabled={option.disabled}
+                onChange={() => toggle(option.value)}
+                aria-label={option.label}
+              />
+              <span>
+                <span className="checkbox-title">{option.label}</span>
+                {option.description && <span className="checkbox-description">{option.description}</span>}
+              </span>
+            </label>
+          )
+        })}
       </div>
       {error ? <span className="field-error">{error}</span> : hint && <span className="field-hint">{hint}</span>}
     </fieldset>

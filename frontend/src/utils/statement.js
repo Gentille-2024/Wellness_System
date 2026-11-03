@@ -1,3 +1,12 @@
+import { formatDate, formatTime } from './format'
+
+// Number of services, total, paid and unpaid amounts of a list of services used
+export function visitTotals(rows) {
+  const total = rows.reduce((sum, visit) => sum + Number(visit.price), 0)
+  const paid = rows.filter((visit) => visit.is_paid).reduce((sum, visit) => sum + Number(visit.price), 0)
+  return { count: rows.length, total, paid, unpaid: total - paid }
+}
+
 /**
  * Payment statement exports: the EUCL employees who used services, the amount
  * for each, a total per company (EUCL only) and the grand total.
@@ -51,7 +60,7 @@ export async function exportStatementExcel({ title, details, data, perCompany, f
   const { default: writeXlsxFile } = await import('write-excel-file/browser')
 
   const header = (value) => ({ value, fontWeight: 'bold', backgroundColor: '#1F7A55', textColor: '#FFFFFF' })
-  const columns = [...(perCompany ? ['Company'] : []), 'Employee', 'Employee ID', 'Department', 'Visits', 'Amount (RWF)']
+  const columns = [...(perCompany ? ['Company'] : []), 'Employee', 'Employee ID', 'Department', 'Services', 'Amount (RWF)']
   const money = { type: Number, format: '#,##0' }
 
   const sheet = [
@@ -107,7 +116,7 @@ export async function exportEmployeeSummaryExcel({ title, details, data, filenam
     ...details.map((line) => [line]),
     [`Generated ${new Date().toLocaleString()}`],
     [],
-    ['Employee', 'Employee ID', 'Department', 'Services used', 'Visits', 'Days', 'Amount (RWF)'].map(header),
+    ['Employee', 'Employee ID', 'Department', 'Services used', 'Total services', 'Days', 'Amount (RWF)'].map(header),
   ]
 
   for (const row of data.employees) {
@@ -136,4 +145,100 @@ export async function exportEmployeeSummaryExcel({ title, details, data, filenam
     sheet: 'Employees attended',
     columns: [{ width: 26 }, { width: 13 }, { width: 16 }, { width: 46 }, { width: 9 }, { width: 8 }, { width: 15 }],
   }).toFile(filename)
+}
+
+// "Usage records" (one line per service used) as Excel, with the totals at the end.
+// columns: { employee: false } hides the employee columns, { company: false } the company
+export async function exportVisitsExcel({ title, details, rows, columns = {}, filename }) {
+  const { default: writeXlsxFile } = await import('write-excel-file/browser')
+
+  const header = (value) => ({ value, fontWeight: 'bold', backgroundColor: '#1F7A55', textColor: '#FFFFFF' })
+  const strong = { fontWeight: 'bold', backgroundColor: '#E3EFE9', topBorderStyle: 'thin' }
+  const money = { type: Number, format: '#,##0' }
+  const showEmployee = columns.employee !== false
+  const showCompany = columns.company !== false
+
+  const head = ['Date', 'Time']
+  const widths = [{ width: 13 }, { width: 8 }]
+  if (showEmployee) {
+    head.push('Employee', 'Employee ID', 'Department')
+    widths.push({ width: 26 }, { width: 13 }, { width: 16 })
+  }
+  if (showCompany) {
+    head.push('Company')
+    widths.push({ width: 24 })
+  }
+  head.push('Service', 'Amount (RWF)', 'Paid')
+  widths.push({ width: 22 }, { width: 15 }, { width: 8 })
+
+  const totals = visitTotals(rows)
+  const label = { fontWeight: 'bold' }
+  const sheet = [
+    [{ value: 'EUCL Wellness Management System', fontWeight: 'bold', fontSize: 14 }],
+    [{ value: title, fontWeight: 'bold' }],
+    ...details.map((line) => [line]),
+    [`Generated ${new Date().toLocaleString()}`],
+    [],
+    // Summary
+    [{ value: 'Total services', ...label }, { value: totals.count, type: Number }],
+    [{ value: 'Total amount (RWF)', ...label }, { ...money, value: totals.total }],
+    [{ value: 'Paid (RWF)', ...label }, { ...money, value: totals.paid }],
+    [{ value: 'Unpaid (RWF)', ...label }, { ...money, value: totals.unpaid }],
+    [],
+    head.map(header),
+  ]
+
+  for (const visit of rows) {
+    sheet.push([
+      formatDate(visit.visit_date),
+      formatTime(visit.visited_at),
+      ...(showEmployee ? [visit.employee_name || visit.employee_code, visit.employee_code, visit.department || ''] : []),
+      ...(showCompany ? [visit.company_name] : []),
+      visit.service_name,
+      { ...money, value: Number(visit.price) },
+      visit.is_paid ? 'Yes' : 'No',
+    ])
+  }
+
+  // Totals under the table: paid, unpaid, then the grand total
+  const soft = { fontWeight: 'bold', backgroundColor: '#F3F6F4' }
+  const footer = (text, amount, style) => [
+    { value: text, ...style },
+    ...Array(head.length - 3).fill({ value: null, ...style }),
+    { ...money, value: amount, ...style },
+    { value: null, ...style },
+  ]
+  sheet.push(footer('Paid', totals.paid, soft))
+  sheet.push(footer('Unpaid', totals.unpaid, soft))
+  sheet.push(footer(`Total (${plural(totals.count, 'service')})`, totals.total, strong))
+
+  await writeXlsxFile(sheet, { sheet: 'Services', columns: widths }).toFile(filename)
+}
+
+// Services used -> one line per employee per day (newest day first), with the
+// services joined by commas, the amount, and the time they arrived
+export function visitsByEmployeeDay(rows) {
+  const lines = []
+  const byKey = {}
+  for (const visit of rows) {
+    const key = `${visit.employee}-${visit.visit_date}`
+    if (!byKey[key]) {
+      byKey[key] = {
+        key,
+        date: visit.visit_date,
+        time: visit.visited_at,
+        name: visit.employee_name,
+        code: visit.employee_code,
+        department: visit.department,
+        services: [],
+        amount: 0,
+      }
+      lines.push(byKey[key])
+    }
+    const line = byKey[key]
+    line.services.push(visit.service_name)
+    line.amount += Number(visit.price)
+    if (visit.visited_at < line.time) line.time = visit.visited_at
+  }
+  return lines
 }

@@ -68,7 +68,7 @@ export default function PlaceDetailPage() {
                 </div>
                 <div className="service-list-side">
                   <Badge tone="success">Covered by EUCL</Badge>
-                  <span className="cell-sub">EUCL pays {formatMoney(service.eucl_price)}</span>
+                  <span className="cell-sub">{formatMoney(service.price)}</span>
                 </div>
               </li>
             ))}

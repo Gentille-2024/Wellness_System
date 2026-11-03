@@ -24,7 +24,21 @@ export default function RecordVisitsPage() {
 
   const todayRows = today.data ?? []
   const offered = services.data ?? []
-  const tickedTotal = offered.filter((service) => ticked.includes(service.id)).reduce((sum, service) => sum + Number(service.eucl_price), 0)
+  const tickedTotal = offered.filter((service) => ticked.includes(service.id)).reduce((sum, service) => sum + Number(service.price), 0)
+  // Today's table: one line per employee, their services joined with commas
+  const todayByEmployee = []
+  for (const visit of todayRows) {
+    let line = todayByEmployee.find((row) => row.employee === visit.employee)
+    if (!line) {
+      line = { employee: visit.employee, name: visit.employee_name, code: visit.employee_code, time: visit.visited_at, services: [], amount: 0, recordedBy: [] }
+      todayByEmployee.push(line)
+    }
+    line.services.push(visit.service_name)
+    line.amount += Number(visit.price)
+    if (visit.visited_at > line.time) line.time = visit.visited_at // the latest service
+    const by = visit.recorded_by_name ?? '—'
+    if (!line.recordedBy.includes(by)) line.recordedBy.push(by)
+  }
   const usedTodayHere = selected ? todayRows.filter((visit) => visit.employee === selected.id).map((visit) => visit.service) : []
 
   const search = async (event) => {
@@ -76,12 +90,12 @@ export default function RecordVisitsPage() {
 
   return (
     <>
-      <PageHeader title="Record visits" subtitle="Find the EUCL employee (type their name or employee ID), then tick the services they used. One company per employee per day." />
+      <PageHeader title="Record services" subtitle="Find the EUCL employee (type their name or employee ID), then tick the services they used. One company per employee per day." />
 
-      {!user.company?.is_active && <Alert>This company is deactivated, so visits can't be recorded right now.</Alert>}
+      {!user.company?.is_active && <Alert>This company is deactivated, so services can't be recorded right now.</Alert>}
 
       <div className="stat-grid">
-        <StatCard label="Visits today" value={todayRows.length} icon="checkin" />
+        <StatCard label="Services today" value={todayRows.length} icon="checkin" />
         <StatCard label="Amount today" value={formatMoney(todayRows.reduce((sum, visit) => sum + Number(visit.price), 0))} icon="money" tone="success" />
         <StatCard label="Employees served today" value={new Set(todayRows.map((visit) => visit.employee)).size} icon="users" tone="info" />
       </div>
@@ -148,7 +162,7 @@ export default function RecordVisitsPage() {
                       />
                       <span>
                         <span className="checkbox-title">{service.name}</span>
-                        <span className="checkbox-description">{doneToday ? 'Already recorded today' : `EUCL pays ${formatMoney(service.eucl_price)}`}</span>
+                        <span className="checkbox-description">{doneToday ? 'Already recorded today' : formatMoney(service.price)}</span>
                       </span>
                     </label>
                   )
@@ -159,7 +173,7 @@ export default function RecordVisitsPage() {
                   {ticked.length} service{ticked.length === 1 ? '' : 's'} · {formatMoney(tickedTotal)}
                 </span>
                 <button type="button" className="btn btn-primary" disabled={!selected || !ticked.length || saving} onClick={record}>
-                  {saving ? 'Saving…' : 'Record visit'}
+                  {saving ? 'Saving…' : 'Record services'}
                 </button>
               </div>
             </>
@@ -167,7 +181,11 @@ export default function RecordVisitsPage() {
         </Card>
       </div>
 
-      <Card title="Today at this company" subtitle={`${todayRows.length} services recorded`} flush>
+      <Card
+        title="Today at this company"
+        subtitle={`${todayByEmployee.length} employee${todayByEmployee.length === 1 ? '' : 's'} · ${todayRows.length} service${todayRows.length === 1 ? '' : 's'} recorded`}
+        flush
+      >
         {todayRows.length ? (
           <div className="table-wrap">
             <table className="table">
@@ -175,22 +193,22 @@ export default function RecordVisitsPage() {
                 <tr>
                   <th>Time</th>
                   <th>Employee</th>
-                  <th>Service</th>
+                  <th>Services</th>
                   <th className="num">Amount</th>
                   <th>Recorded by</th>
                 </tr>
               </thead>
               <tbody>
-                {todayRows.map((visit) => (
-                  <tr key={visit.id}>
-                    <td>{formatTime(visit.visited_at)}</td>
+                {todayByEmployee.map((line) => (
+                  <tr key={line.employee}>
+                    <td>{formatTime(line.time)}</td>
                     <td>
-                      <div className="cell-main">{visit.employee_name}</div>
-                      <div className="cell-sub">{visit.employee_code}</div>
+                      <div className="cell-main">{line.name}</div>
+                      <div className="cell-sub">{line.code}</div>
                     </td>
-                    <td>{visit.service_name}</td>
-                    <td className="num">{formatMoney(visit.price)}</td>
-                    <td>{visit.recorded_by_name ?? '—'}</td>
+                    <td>{line.services.join(', ')}</td>
+                    <td className="num">{formatMoney(line.amount)}</td>
+                    <td>{line.recordedBy.join(', ')}</td>
                   </tr>
                 ))}
               </tbody>

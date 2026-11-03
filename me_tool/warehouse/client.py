@@ -41,7 +41,7 @@ def sign_in(username, password, base_url=None, session=None):
 
 
 class WellnessClient:
-    """The M&E tool's service account (role "M&E sync service")."""
+    """The M&E tool's service account (role "M&E officer", which can export the data)."""
 
     def __init__(self, base_url=None, username=None, password=None, session=None):
         self.base = (base_url or settings.WELLNESS_API_URL).rstrip("/")

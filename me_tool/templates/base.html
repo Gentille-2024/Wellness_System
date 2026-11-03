@@ -58,6 +58,7 @@
     <div class="sidebar-foot">
       <div class="who">{{ access.full_name|default:user.username }}</div>
       <div class="muted">{{ access.role_names|join:", "|default:"" }}</div>
+      <a class="btn btn-sm" href="{{ wellness_app_url }}/{% if 'view_my_overview' in access.perms %}my-wellness{% endif %}">Wellness system</a>
       <form method="post" action="{% url 'accounts:logout' %}">
         {% csrf_token %}
         <button type="submit" class="btn btn-sm">Sign out</button>

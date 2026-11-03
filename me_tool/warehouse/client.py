@@ -40,6 +40,23 @@ def sign_in(username, password, base_url=None, session=None):
         return None, "The wellness system can't be reached right now. Please try again later."
 
 
+def redeem_ticket(ticket, base_url=None, session=None):
+    """
+    Trade the one-time ticket the wellness system gave the browser
+    ("Open the M&E tool") for that person's /api/me/ data.
+    Returns (profile, None) or (None, message).
+    """
+    base = (base_url or settings.WELLNESS_API_URL).rstrip("/")
+    http = session or requests
+    try:
+        response = http.post(f"{base}/api/me-tool/redeem/", json={"ticket": ticket}, timeout=settings.WELLNESS_API_TIMEOUT)
+    except requests.RequestException:
+        return None, "The wellness system can't be reached right now. Please try again later."
+    if response.status_code != 200:
+        return None, _message(response)
+    return response.json(), None
+
+
 class WellnessClient:
     """The M&E tool's service account (role "M&E officer", which can export the data)."""
 

@@ -154,6 +154,8 @@ STORAGES = {
 # The wellness system's API (in Docker: http://host.docker.internal:8000)
 WELLNESS_API_URL = env("WELLNESS_API_URL", "http://127.0.0.1:8000").rstrip("/")
 WELLNESS_API_TIMEOUT = int(env("WELLNESS_API_TIMEOUT", "20"))
+# The wellness website people use (its React app), for the "Wellness system" link
+WELLNESS_APP_URL = env("WELLNESS_APP_URL", "http://localhost:5173").rstrip("/")
 # The service account (role "M&E officer" in the wellness system: it has "Export data for M&E")
 WELLNESS_SYNC_USERNAME = env("WELLNESS_SYNC_USERNAME", "")
 WELLNESS_SYNC_PASSWORD = env("WELLNESS_SYNC_PASSWORD", "")

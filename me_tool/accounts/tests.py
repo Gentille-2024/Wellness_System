@@ -99,3 +99,47 @@ class SignInClientTests(TestCase):
         profile, error = sign_in("hr", "bad", base_url="http://w", session=session)
         self.assertIsNone(profile)
         self.assertIn("No active account", error)
+
+
+OFFICER_PROFILE = {
+    "id": 9, "username": "beca", "first_name": "Beca", "last_name": "Iteka", "full_name": "Beca ITEKA",
+    "email": "beca@eucl.test", "is_superuser": False, "role_names": ["M&E officer"],
+    "permissions": ["view_me_dashboards", "manage_me_targets", "view_my_overview"], "company": None,
+}
+
+
+class SsoTests(TestCase):
+    """"Open the M&E tool" in the wellness system signs the person in as themselves."""
+
+    def setUp(self):
+        World()
+
+    def sso(self, profile=None, error=None):
+        with mock.patch("accounts.views.redeem_ticket", return_value=(profile, error)) as redeem:
+            response = self.client.get("/accounts/sso/", {"ticket": "abc"})
+        return response, redeem
+
+    def test_signs_in_as_the_m_and_e_officer(self):
+        response, redeem = self.sso(OFFICER_PROFILE)
+        redeem.assert_called_once_with("abc")
+        self.assertRedirects(response, "/", fetch_redirect_response=False)
+        self.assertEqual(int(self.client.session["_auth_user_id"]), User.objects.get(username="beca").pk)
+        self.assertContains(self.client.get("/"), "Beca ITEKA")
+
+    def test_replaces_whoever_was_signed_in(self):
+        admin = User.objects.create_superuser("admin_local", "a@x.test", "pw")
+        self.client.force_login(admin)
+        self.sso(OFFICER_PROFILE)
+        self.assertEqual(int(self.client.session["_auth_user_id"]), User.objects.get(username="beca").pk)
+
+    def test_expired_ticket_signs_out_and_shows_why(self):
+        admin = User.objects.create_superuser("admin_local", "a@x.test", "pw")
+        self.client.force_login(admin)
+        response, _ = self.sso(None, "This sign-in link has expired or was already used.")
+        self.assertContains(response, "expired or was already used")
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_no_m_and_e_role(self):
+        response, _ = self.sso({**OFFICER_PROFILE, "permissions": ["view_my_overview"]})
+        self.assertContains(response, "no access to the M&amp;E tool")
+        self.assertNotIn("_auth_user_id", self.client.session)

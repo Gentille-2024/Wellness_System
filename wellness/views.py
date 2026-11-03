@@ -1,7 +1,10 @@
+import secrets
 from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth.models import User
+from django.core import signing
+from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.http import HttpResponse
 from django.db.models import Count, Exists, OuterRef, Prefetch, Q, Sum
@@ -160,8 +163,8 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 
 # --------------------------------------------------------------- my account
 
-def me_payload(request):
-    user = request.user
+def me_payload(request=None, user=None):
+    user = user or request.user
     profile = getattr(user, "userprofile", None)
     company = profile.company if profile else None
     employee = Employee.objects.filter(user=user).select_related("user").first()
@@ -207,6 +210,55 @@ class MeView(APIView):
         if phone:
             Employee.objects.filter(user=request.user).update(phone=phone)
         return Response(me_payload(request))
+
+
+# ------------------------------------------------- sign-in to the M&E tool
+# The M&E tool is a separate website. "Open the M&E tool" asks here for a
+# ticket; the browser carries it to the M&E tool, whose server trades it
+# (once, within a minute) for this user's /api/me/ data and signs them in as
+# themselves: no second password, and never as whoever used that browser before.
+
+ME_TICKET_SALT = "wellness.me-tool-ticket"
+ME_TICKET_SECONDS = 60
+
+
+class MeToolTicketView(APIView):
+    """POST /api/me-tool/ticket/ -> a one-time ticket to sign in to the M&E tool."""
+
+    write_perms = ("view_me_dashboards", "manage_me_targets")
+
+    def post(self, request):
+        ticket = signing.dumps({"u": request.user.pk, "n": secrets.token_urlsafe(16)}, salt=ME_TICKET_SALT)
+        return Response({"ticket": ticket, "expires_in": ME_TICKET_SECONDS})
+
+
+class MeToolTicketThrottle(AnonRateThrottle):
+    rate = "30/minute"
+
+
+class MeToolRedeemView(APIView):
+    """POST /api/me-tool/redeem/ {ticket} (called by the M&E tool's server) -> the user's /api/me/ data."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [MeToolTicketThrottle]
+    INVALID = "This sign-in link has expired or was already used. Open the M&E tool again from the wellness system."
+
+    def post(self, request):
+        try:
+            data = signing.loads(str(request.data.get("ticket", "")), salt=ME_TICKET_SALT, max_age=ME_TICKET_SECONDS)
+        except signing.BadSignature:
+            raise ValidationError({"detail": self.INVALID})
+        # Each ticket works once
+        if not cache.add(f"me-tool-ticket:{data['n']}", True, ME_TICKET_SECONDS * 2):
+            raise ValidationError({"detail": self.INVALID})
+        user = User.objects.filter(pk=data["u"], is_active=True).first()
+        if user is None:
+            raise ValidationError({"detail": self.INVALID})
+        deny_if_company_deactivated(user)
+        if not has_perm(user, "view_me_dashboards", "manage_me_targets"):
+            raise PermissionDenied("Your account has no access to the M&E tool.")
+        return Response(me_payload(user=user))
 
 
 class ChangePasswordView(APIView):

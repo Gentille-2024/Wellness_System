@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
 import { useAuth } from '../auth/AuthContext'
+import { openMeTool } from '../api/meTool'
 import { navFor } from '../navigation'
 import Brand from './Brand'
 import Icon from './Icon'
@@ -31,8 +32,19 @@ export default function AppLayout() {
               <div className="nav-section-title">{section.section}</div>
               {section.items.map((item) =>
                 item.href ? (
-                  // Another website (the M&E tool): opens in a new tab
-                  <a key={item.href} href={item.href} target="_blank" rel="noreferrer" className="nav-link">
+                  // Another website (the M&E tool): opens in a new tab, signed in as this user
+                  <a
+                    key={item.href}
+                    href={item.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="nav-link"
+                    onClick={(event) => {
+                      event.preventDefault()
+                      setMenuOpen(false)
+                      openMeTool()
+                    }}
+                  >
                     <Icon name={item.icon} />
                     {item.label}
                     <span className="nav-external" aria-hidden="true">↗</span>

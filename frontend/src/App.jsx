@@ -1,10 +1,13 @@
 import { Navigate, Outlet, Route, Routes } from 'react-router'
 import { useAuth } from './auth/AuthContext'
-import { can, COMPANY_PERMISSIONS, EMPLOYEE_PERMISSIONS, EUCL_DASHBOARD_PERMISSIONS, EUCL_PERMISSIONS, homeFor } from './auth/access'
+import { useEffect, useRef, useState } from 'react'
+import { can, COMPANY_PERMISSIONS, EMPLOYEE_PERMISSIONS, EUCL_DASHBOARD_PERMISSIONS, EUCL_PERMISSIONS, homeFor, meToolIsHome } from './auth/access'
+import { errorMessage } from './api/client'
+import { meToolSignInUrl } from './api/meTool'
 import { ME_PERMISSIONS, ME_TOOL_URL } from './navigation'
 import AppLayout from './components/AppLayout'
 import ProtectedRoute from './components/ProtectedRoute'
-import { EmptyState } from './components/ui'
+import { EmptyState, Loading } from './components/ui'
 import AccountPage from './pages/AccountPage'
 import CompaniesPage from './pages/CompaniesPage'
 import CompanyActivityPage from './pages/CompanyActivityPage'
@@ -31,6 +34,7 @@ import VisitsPage from './pages/VisitsPage'
 // "/" sends each user to the right home for their permissions
 function HomeRedirect() {
   const { user } = useAuth()
+  if (meToolIsHome(user)) return <MeToolRedirect />
   const target = homeFor(user)
   if (!target) {
     // The M&E tool is a separate website: its link is in the menu
@@ -50,6 +54,27 @@ function HomeRedirect() {
     )
   }
   return <Navigate to={target} replace />
+}
+
+// An M&E officer's home is the M&E tool: go there, signed in as themselves
+function MeToolRedirect() {
+  const [error, setError] = useState('')
+  const started = useRef(false) // once, also in React's development double run
+
+  useEffect(() => {
+    if (started.current) return
+    started.current = true
+    meToolSignInUrl()
+      .then((url) => window.location.replace(url))
+      .catch((err) => setError(errorMessage(err)))
+  }, [])
+
+  if (!error) return <Loading text="Opening the M&E tool…" />
+  return (
+    <EmptyState icon="activity" title="The M&E tool could not be opened">
+      {error} Try the <a href={ME_TOOL_URL}>M&amp;E tool</a> sign-in page, or use the menu.
+    </EmptyState>
+  )
 }
 
 // A page (or group of pages) that needs one of these permissions

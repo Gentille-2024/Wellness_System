@@ -4,7 +4,7 @@ from django.shortcuts import redirect, render
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
-from warehouse.client import sign_in
+from warehouse.client import redeem_ticket, sign_in
 
 from .models import Access
 
@@ -62,6 +62,24 @@ def login_view(request):
                 return redirect(target)
             return redirect("dashboards:overview")
     return render(request, "accounts/login.html", {"error": error, "username": username, "next": request.GET.get("next", "")})
+
+
+def sso_view(request):
+    """
+    /accounts/sso/?ticket=... : "Open the M&E tool" in the wellness system.
+    Signs the person in as themselves; whoever used this browser before
+    (e.g. a super admin) is signed out first.
+    """
+    profile, error = redeem_ticket(request.GET.get("ticket", ""))
+    if profile is not None:
+        user = _save_access(profile)
+        if user.access.has_access:
+            logout(request)
+            login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+            return redirect("dashboards:overview")
+        error = "Your account has no access to the M&E tool. Ask EUCL to give you an M&E role."
+    logout(request)
+    return render(request, "accounts/login.html", {"error": error, "username": "", "next": ""})
 
 
 @require_POST

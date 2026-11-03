@@ -58,6 +58,19 @@ export const EMPLOYEE_PAGES = [
 ]
 export const EMPLOYEE_PERMISSIONS = ['view_my_overview', 'view_places', 'view_my_services']
 
+// M&E officers (and anyone else whose only work pages are in the M&E tool)
+// go straight to the M&E tool, signed in as themselves. Someone with an EUCL
+// or company page here (super admin, HR, boss...) starts here instead.
+const ME_TOOL_PERMISSIONS = ['view_me_dashboards', 'manage_me_targets']
+export function meToolIsHome(user) {
+  if (!can(user, ...ME_TOOL_PERMISSIONS)) return false
+  if (can(user, ...EUCL_DASHBOARD_PERMISSIONS)) return false
+  if (EUCL_PAGES.some((page) => can(user, ...page.perms))) return false
+  const own = user?.role_permissions ?? []
+  if (user?.company && COMPANY_PAGES.some((page) => page.perms.some((p) => own.includes(p)))) return false
+  return true
+}
+
 // Where a user lands after logging in
 export function homeFor(user) {
   if (can(user, ...EUCL_DASHBOARD_PERMISSIONS)) return '/eucl'

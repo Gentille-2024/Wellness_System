@@ -928,7 +928,8 @@ class UserAccountSerializer(serializers.ModelSerializer):
         is_superuser = validated_data.pop("is_superuser", instance.is_superuser)
         instance = super().update(instance, validated_data)
         self.save_roles(instance, roles, company, is_superuser)
-        return instance
+        # Read it again: the list's prefetched roles would show the old role
+        return User.objects.select_related("userprofile__company", "employee").get(pk=instance.pk)
 
 
 class FeedbackSerializer(serializers.Serializer):

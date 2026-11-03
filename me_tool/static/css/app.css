@@ -158,6 +158,7 @@ h3 { font-size: 15px; }
 .sidebar-foot { margin-top: auto; padding: 12px 8px 0; border-top: 1px solid var(--border); font-size: 13px; }
 .sidebar-foot .who { font-weight: 600; }
 .sidebar-foot form { margin-top: 8px; }
+.sidebar-foot > a.btn { margin-top: 8px; margin-right: 6px; }
 
 .main { min-width: 0; padding: 28px 32px 48px; }
 

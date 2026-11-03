@@ -1,3 +1,5 @@
+import time
+from unittest import mock
 from datetime import timedelta
 from decimal import Decimal
 
@@ -1079,16 +1081,15 @@ class PageRoleTests(EuclTestCase):
         self.assertTrue({"view_company_dashboard", "record_visits", "view_company_services",
                          "view_employees_attended", "take_attendance"} <= perms)
 
-    def test_boss_gives_several_page_roles(self):
-        response = self.as_user(self.fit_boss).post(
-            "/api/users/",
-            {"username": "reception1", "first_name": "Reception", "last_name": "One", "email": "r1@test.test",
-             "roles": ["COMPANY_DASHBOARD", "COMPANY_RECORD_VISITS", "COMPANY_ATTENDANCE"],
-             "password": "Reception@2026", "password_confirm": "Reception@2026"},
-            format="json",
-        )
+    def test_boss_gives_one_role(self):
+        data = {"username": "reception1", "first_name": "Reception", "last_name": "One", "email": "r1@test.test",
+                "roles": ["COMPANY_DASHBOARD", "COMPANY_RECORD_VISITS"],
+                "password": "Reception@2026", "password_confirm": "Reception@2026"}
+        response = self.as_user(self.fit_boss).post("/api/users/", data, format="json")
+        self.assertEqual(response.status_code, 400)  # never two roles
+        response = self.as_user(self.fit_boss).post("/api/users/", {**data, "roles": ["COMPANY_RECEPTIONIST"]}, format="json")
         self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(sorted(response.data["roles"]), ["COMPANY_ATTENDANCE", "COMPANY_DASHBOARD", "COMPANY_RECORD_VISITS"])
+        self.assertEqual(response.data["roles"], ["COMPANY_RECEPTIONIST"])
 
 
 class CompanyOwnRoleTests(EuclTestCase):
@@ -1463,3 +1464,46 @@ class PriceChangeTests(EuclTestCase):
         self.assertEqual(self.as_user(self.fit_boss).get("/api/price-changes/").status_code, 403)
         self.assertEqual(self.as_user(self.fit_desk).get("/api/price-changes/").status_code, 403)
         self.assertEqual(self.as_user(self.john.user).get("/api/price-changes/").status_code, 403)
+
+
+class MeToolSignInTests(EuclTestCase):
+    """The wellness system hands an M&E user a one-time ticket that signs them in to the M&E tool."""
+
+    def setUp(self):
+        super().setUp()
+        from django.core.cache import cache
+        cache.clear()
+        self.officer = self.make_user("me_officer", "ME_OFFICER")
+
+    def ticket(self, user):
+        return self.as_user(user).post("/api/me-tool/ticket/")
+
+    def redeem(self, ticket):
+        self.client.force_authenticate(None)
+        return self.client.post("/api/me-tool/redeem/", {"ticket": ticket}, format="json")
+
+    def test_the_ticket_signs_in_as_that_person_once(self):
+        response = self.ticket(self.officer)
+        self.assertEqual(response.status_code, 200)
+        ticket = response.data["ticket"]
+        me = self.redeem(ticket)
+        self.assertEqual(me.status_code, 200, me.data)
+        self.assertEqual(me.data["username"], "me_officer")
+        self.assertFalse(me.data["is_superuser"])
+        self.assertIn("view_me_dashboards", me.data["permissions"])
+        self.assertEqual(self.redeem(ticket).status_code, 400)  # used already
+
+    def test_only_m_and_e_users_get_a_ticket(self):
+        self.assertEqual(self.ticket(self.john.user).status_code, 403)
+        self.assertEqual(self.ticket(self.fit_desk).status_code, 403)
+
+    def test_bad_or_old_tickets(self):
+        self.assertEqual(self.redeem("nonsense").status_code, 400)
+        ticket = self.ticket(self.officer).data["ticket"]
+        with mock.patch("django.core.signing.time.time", return_value=time.time() + 120):
+            self.assertEqual(self.redeem(ticket).status_code, 400)
+
+    def test_blocked_users_cannot_use_their_ticket(self):
+        ticket = self.ticket(self.officer).data["ticket"]
+        User.objects.filter(pk=self.officer.pk).update(is_active=False)
+        self.assertEqual(self.redeem(ticket).status_code, 400)

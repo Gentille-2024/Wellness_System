@@ -7,6 +7,9 @@ staticfiles/
 venv/
 __pycache__/
 *.pyc
+# Local databases and uploaded/generated files (M&E reports...)
+*.sqlite3
+media/
 
 # Frontend
 frontend/node_modules/

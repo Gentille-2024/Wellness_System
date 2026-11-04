@@ -51,7 +51,7 @@ Docker: `docker compose up -d --build` (web on :8100), `docker compose exec web 
 
 ### Deploying (Railway)
 - Wellness API: root `Dockerfile` (mysqlclient build deps, `collectstatic`, then `migrate` + gunicorn on `$PORT`). Settings read `DATABASE_URL` (dj-database-url) or the `DB_*` values, `SECRET_KEY`/`DJANGO_SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS`; WhiteNoise serves `/static/`.
-- Frontend: built with `VITE_API_URL` (API address ending in `/api`; empty locally) and `VITE_ME_URL`; `npm start` serves `dist/` with SPA fallback on `$PORT`.
+- Frontend: built with `VITE_API_URL` (API address ending in `/api`; empty locally) and `VITE_ME_URL`; `npm start` runs `server.js` (no dependencies) to serve `dist/` with SPA fallback on `$PORT`.
 - M&E tool: `me_tool/Dockerfile`; gunicorn binds `$PORT`; `RUN_WORKER_IN_WEB=1` runs Celery worker + beat inside the web service (report files share its volume at `/app/media`).
 
 ## Wellness system architecture

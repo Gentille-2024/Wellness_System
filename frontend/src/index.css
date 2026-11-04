@@ -247,6 +247,23 @@ a {
   color: var(--sidebar-muted);
 }
 
+/* Someone not linked to a company chooses whose company pages to open */
+.company-picker {
+  display: block;
+  padding: 0 4px 8px;
+}
+
+.company-picker select {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
 .nav-link {
   display: flex;
   align-items: center;

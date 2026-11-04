@@ -261,12 +261,16 @@ export function RoleFormModal({ role, forCompany = false, withPermissions = true
     name: role?.name ?? '',
     description: role?.description ?? '',
     permissions: role?.permissions ?? [],
+    is_company_role: role ? role.is_company_role : forCompany,
   })
+  // EUCL chooses who a new role is for; built-in roles keep theirs
+  const chooseKind = !forCompany && !role?.is_system && !role?.company
   const { values, errors, handleChange, setValues } = form
 
   const save = form.submit(async (formValues) => {
     const payload = { ...formValues }
     if (!withPermissions && editing) delete payload.permissions // switched on the Roles page
+    if (!chooseKind) delete payload.is_company_role
     const { data } = editing ? await api.patch(`/roles/${role.id}/`, payload) : await api.post('/roles/', payload)
     onSaved(data)
   })
@@ -282,7 +286,7 @@ export function RoleFormModal({ role, forCompany = false, withPermissions = true
           ? 'A role for your company’s staff: choose the pages it opens. Only your company sees it.'
           : withPermissions
             ? 'A role is a named set of permissions. Everyone with the role gets all of them.'
-            : 'Name the role, then switch on its permissions. A role with only company permissions becomes a company role by itself.'
+            : 'Name the role and choose who gets it, then switch on its permissions.'
       }
       onClose={onClose}
       footer={<FormFooter onClose={onClose} submitting={form.submitting} label={editing ? 'Save role' : 'Create role'} formId="role-form" />}
@@ -293,6 +297,22 @@ export function RoleFormModal({ role, forCompany = false, withPermissions = true
           <Field label="Role name" name="name" value={values.name} onChange={handleChange} error={errors.name} placeholder={forCompany ? 'e.g. Cashier' : 'e.g. Finance officer'} required />
           <Field label="Description" name="description" value={values.description} onChange={handleChange} error={errors.description} placeholder="What this person does" />
         </div>
+
+        {chooseKind && (
+          <CheckboxGroup
+            single
+            name="role-kind"
+            label="Who gets this role?"
+            options={[
+              { value: 'eucl', label: 'EUCL staff', description: 'People not linked to a company (like HR or M&E officer): EUCL pages, My wellness, M&E.' },
+              { value: 'company', label: 'Company staff', description: 'Staff of a service provider: the My company pages (and EUCL pages if you switch them on).' },
+            ]}
+            value={[values.is_company_role ? 'company' : 'eucl']}
+            onChange={([kind]) => setValues((prev) => ({ ...prev, is_company_role: kind === 'company' }))}
+            error={errors.is_company_role}
+            hint={editing ? 'Can only change while nobody has this role.' : null}
+          />
+        )}
 
 
         {withPermissions && (

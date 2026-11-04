@@ -33,6 +33,11 @@ def load_env_file(path):
 
 load_env_file(BASE_DIR / ".env")
 
+from corsheaders.defaults import default_headers  # noqa: E402
+
+# The app sends the company chosen for the company pages in this header
+CORS_ALLOW_HEADERS = (*default_headers, "x-acting-company")
+
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
 ]
@@ -71,6 +76,8 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    # The company someone not linked to one chose for the company pages
+    'wellness.permissions.ActingCompanyMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]

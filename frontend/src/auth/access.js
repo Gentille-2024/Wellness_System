@@ -67,7 +67,7 @@ export function meToolIsHome(user) {
   if (can(user, ...EUCL_DASHBOARD_PERMISSIONS)) return false
   if (EUCL_PAGES.some((page) => can(user, ...page.perms))) return false
   const own = user?.role_permissions ?? []
-  if (user?.company && COMPANY_PAGES.some((page) => page.perms.some((p) => own.includes(p)))) return false
+  if (user?.company && !user.acting_company && COMPANY_PAGES.some((page) => page.perms.some((p) => own.includes(p)))) return false
   return true
 }
 
@@ -75,7 +75,8 @@ export function meToolIsHome(user) {
 export function homeFor(user) {
   if (can(user, ...EUCL_DASHBOARD_PERMISSIONS)) return '/eucl'
   const own = user?.role_permissions ?? [] // from roles, not the super admin flag
-  if (user?.company) {
+  // Company staff start on their company's pages (not someone who only chose a company)
+  if (user?.company && !user.acting_company) {
     const page = COMPANY_PAGES.find((item) => item.perms.some((p) => own.includes(p)))
     if (page) return page.to
   }

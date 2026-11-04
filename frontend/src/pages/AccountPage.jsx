@@ -49,7 +49,7 @@ export default function AccountPage() {
             {(user.company || employee) && (
               <div>
                 <dt>Company</dt>
-                <dd>{user.company?.name ?? 'EUCL'}</dd>
+                <dd>{user.company && !user.acting_company ? user.company.name : 'EUCL'}</dd>
               </div>
             )}
             {employee && (

@@ -10,7 +10,7 @@ import { Avatar } from './ui'
 
 // The frame around every page after login: sidebar menu + top bar + page
 export default function AppLayout() {
-  const { user, logout } = useAuth()
+  const { user, logout, chooseCompany } = useAuth()
   const [menuOpen, setMenuOpen] = useState(false) // sidebar on small screens
   const sections = navFor(user) // only the links this user's permissions allow
   const displayName = user.full_name || user.username
@@ -30,6 +30,20 @@ export default function AppLayout() {
           {sections.map((section) => (
             <div key={section.section} className="nav-section">
               <div className="nav-section-title">{section.section}</div>
+              {section.needsCompany && user.acting_company && (
+                // Not linked to a company (e.g. HR): choose whose company pages to open
+                <label className="company-picker">
+                  <span className="sr-only">Company</span>
+                  <select value={user.company.id} onChange={(event) => chooseCompany(event.target.value)}>
+                    {user.company_choices.map((company) => (
+                      <option key={company.id} value={company.id}>
+                        {company.name}
+                        {company.is_active ? '' : ' (deactivated)'}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               {section.items.map((item) =>
                 item.href ? (
                   // Another website (the M&E tool): opens in a new tab, signed in as this user
@@ -91,7 +105,7 @@ export default function AppLayout() {
             <Icon name="menu" />
           </button>
           <div className="topbar-context">
-            {user.company?.name ?? 'EUCL Wellness Management System'}
+            {user.company && !user.acting_company ? user.company.name : 'EUCL Wellness Management System'}
           </div>
           <div className="topbar-date">{today}</div>
           <ThemeToggle />
@@ -99,7 +113,8 @@ export default function AppLayout() {
 
         <main className="page">
           {/* The current page is rendered here */}
-          <Outlet />
+          {/* Changing the chosen company reloads the page's data */}
+          <Outlet key={user.acting_company ? user.company.id : 'own'} />
         </main>
       </div>
     </div>

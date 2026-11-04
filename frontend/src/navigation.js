@@ -57,6 +57,8 @@ export function navFor(user) {
   const sections = SECTIONS.filter((section) => !section.needsCompany || user.company)
     .map((section) => ({
       ...section,
+      // Not linked to a company: these are the pages of the company they chose
+      section: section.needsCompany && user.acting_company ? 'Company pages' : section.section,
       // The super admin has every permission, but company/employee pages
       // only make sense for real company staff and employees
       items: section.items.filter((item) =>

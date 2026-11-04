@@ -22,7 +22,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from . import employee_import
 from .models import display_name
 from .models import Company, Employee, Payment, Permission, PriceChange, Role, Service, Visit
-from .permissions import active_roles, company_role_permissions, deny_if_company_deactivated, get_company, get_permissions, has_perm
+from .permissions import active_roles, company_choices, company_role_permissions, deny_if_company_deactivated, get_company, get_permissions, has_perm
 from .serializers import (
     PriceChangeSerializer,
     record_price_change,
@@ -188,6 +188,11 @@ def me_payload(request=None, user=None):
             )
         ) if profile else [],
         "company": CompanySerializer(company).data if company else None,
+        # Not linked to a company but has company permissions: the companies
+        # they may open the company pages for (they choose one in the app)
+        "company_choices": [
+            {"id": c.id, "name": c.name, "is_active": c.is_active} for c in company_choices(user)
+        ],
         "employee": EmployeeSerializer(employee).data if employee else None,
     }
 

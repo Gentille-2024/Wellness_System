@@ -25,10 +25,18 @@ export const tokens = {
 // Every request made with `api` goes to /api/... (forwarded to Django by Vite)
 const api = axios.create({ baseURL: '/api' })
 
-// 1) Before each request: attach the access token
+// Someone not linked to a company who has company permissions (e.g. HR)
+// chooses which company the company pages are for; every request says which.
+let actingCompanyId = null
+export function setActingCompany(id) {
+  actingCompanyId = id ?? null
+}
+
+// 1) Before each request: attach the access token (and the chosen company)
 api.interceptors.request.use((config) => {
   const access = tokens.access
   if (access) config.headers.Authorization = `Bearer ${access}`
+  if (actingCompanyId) config.headers['X-Acting-Company'] = String(actingCompanyId)
   return config
 })
 

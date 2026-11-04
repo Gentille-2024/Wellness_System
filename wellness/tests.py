@@ -1367,18 +1367,35 @@ class RolesAndPermissionsTests(EuclTestCase):
         response = self.as_user(self.fit_boss).post("/api/permissions/", {"name": "X", "area": "Company"}, format="json")
         self.assertEqual(response.status_code, 403)
 
-    def test_company_role_follows_its_permissions(self):
-        response = self.as_user(self.admin).post("/api/roles/", {"name": "Cashier", "permissions": []}, format="json")
+    def test_the_super_admin_chooses_who_a_new_role_is_for(self):
+        response = self.as_user(self.admin).post("/api/roles/", {"name": "Cashier", "permissions": [], "is_company_role": True}, format="json")
         role = Role.objects.get(pk=response.data["id"])
-        self.assertFalse(role.is_company_role)
-        # only company permissions -> a company role
-        self.as_user(self.admin).patch(f"/api/roles/{role.id}/", {"permissions": ["record_visits"]}, format="json")
+        self.assertTrue(role.is_company_role)
+        # a company role may also get EUCL permissions, and stays a company role
+        response = self.as_user(self.admin).patch(f"/api/roles/{role.id}/", {"permissions": ["record_visits", "view_price_changes"]}, format="json")
+        self.assertEqual(response.status_code, 200, response.data)
         role.refresh_from_db()
         self.assertTrue(role.is_company_role)
-        # add an EUCL permission -> an EUCL role again
-        self.as_user(self.admin).patch(f"/api/roles/{role.id}/", {"permissions": ["record_visits", "manage_employees"]}, format="json")
-        role.refresh_from_db()
-        self.assertFalse(role.is_company_role)
+        # an EUCL role by default
+        response = self.as_user(self.admin).post("/api/roles/", {"name": "Auditor", "permissions": ["view_all_visits"]}, format="json")
+        self.assertFalse(response.data["is_company_role"])
+
+    def test_built_in_roles_keep_their_kind(self):
+        boss = Role.objects.get(code="COMPANY_BOSS")
+        codes = list(boss.permissions.values_list("code", flat=True)) + ["view_price_changes", "view_my_overview"]
+        self.assertEqual(self.as_user(self.admin).patch(f"/api/roles/{boss.id}/", {"permissions": codes}, format="json").status_code, 200)
+        boss.refresh_from_db()
+        self.assertTrue(boss.is_company_role)  # still a company role: bosses keep their company
+        hr = Role.objects.get(code="EUCL_HR")
+        self.as_user(self.admin).patch(f"/api/roles/{hr.id}/", {"is_company_role": True}, format="json")
+        hr.refresh_from_db()
+        self.assertFalse(hr.is_company_role)
+
+    def test_who_a_role_is_for_only_changes_while_nobody_has_it(self):
+        role = Role.objects.create(code="AUDITOR", name="Auditor")
+        self.make_user("aud", "AUDITOR")
+        response = self.as_user(self.admin).patch(f"/api/roles/{role.id}/", {"is_company_role": True}, format="json")
+        self.assertEqual(response.status_code, 400)
 
 
 class FeedbackTests(EuclTestCase):
@@ -1507,3 +1524,63 @@ class MeToolSignInTests(EuclTestCase):
         ticket = self.ticket(self.officer).data["ticket"]
         User.objects.filter(pk=self.officer.pk).update(is_active=False)
         self.assertEqual(self.redeem(ticket).status_code, 400)
+
+
+class AnyRoleAnyPermissionTests(EuclTestCase):
+    """Any role may have any permission: HR (not linked to a company) chooses which company the company pages are for."""
+
+    def setUp(self):
+        super().setUp()
+        self.hr_role = Role.objects.get(code="EUCL_HR")
+        self.hr_role.permissions.add(*Permission.objects.filter(
+            code__in=["take_attendance", "record_visits", "view_company_services", "view_company_dashboard",
+                      "view_company_feedback", "view_employees_attended"]))
+
+    def acting(self, company):
+        self.client.force_authenticate(self.hr)
+        self.client.credentials(HTTP_X_ACTING_COMPANY=str(company.id))
+        return self.client
+
+    def test_me_lists_the_companies_to_choose_from(self):
+        me = self.as_user(self.hr).get("/api/me/").data
+        self.assertIsNone(me["company"])  # HR still isn't linked to a company
+        self.assertEqual([c["name"] for c in me["company_choices"]], ["BlueSpa", "FitZone"])
+        self.assertIn("take_attendance", me["role_permissions"])
+
+    def test_hr_records_services_at_the_chosen_company(self):
+        client = self.acting(self.fitzone)
+        response = client.post("/api/visits/", {"employee": self.john.id, "services": [self.gym.id]}, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(Visit.objects.get(employee=self.john).company, self.fitzone)
+        # ...and can't record another company's service while FitZone is chosen
+        response = client.post("/api/visits/", {"employee": self.mary.id, "services": [self.massage.id]}, format="json")
+        self.assertEqual(response.status_code, 400)
+
+    def test_company_pages_show_the_chosen_company(self):
+        self.record(self.fit_desk, self.john, self.gym)
+        # without the all-companies permission, so only the chosen company counts
+        self.hr_role.permissions.remove(*Permission.objects.filter(code="view_all_employees_attended"))
+        fit = self.acting(self.fitzone)
+        self.assertEqual(fit.get("/api/stats/", {"scope": "company"}).status_code, 200)
+        self.assertEqual(fit.get("/api/visits/by-employee/").data["totals"]["employees"], 1)
+        spa = self.acting(self.spa)
+        self.assertEqual(spa.get("/api/visits/by-employee/").data["totals"]["employees"], 0)
+
+    def test_the_choice_only_counts_with_a_company_permission(self):
+        self.hr_role.permissions.remove(*Permission.objects.filter(area="Company"))
+        self.assertEqual(self.as_user(self.hr).get("/api/me/").data["company_choices"], [])
+        response = self.acting(self.fitzone).post("/api/visits/", {"employee": self.john.id, "services": [self.gym.id]}, format="json")
+        self.assertEqual(response.status_code, 403)
+
+    def test_company_staff_cannot_switch_company(self):
+        self.client.force_authenticate(self.fit_desk)
+        self.client.credentials(HTTP_X_ACTING_COMPANY=str(self.spa.id))
+        response = self.client.post("/api/visits/", {"employee": self.john.id, "services": [self.massage.id]}, format="json")
+        self.assertEqual(response.status_code, 400)  # still FitZone's receptionist
+
+    def test_archived_companies_cannot_be_chosen(self):
+        self.spa.deleted_at = timezone.now()
+        self.spa.save()
+        self.assertEqual([c["name"] for c in self.as_user(self.hr).get("/api/me/").data["company_choices"]], ["FitZone"])
+        response = self.acting(self.spa).get("/api/stats/", {"scope": "company"})
+        self.assertNotEqual(response.status_code, 200)

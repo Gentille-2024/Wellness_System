@@ -199,21 +199,34 @@ class RoleSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(f"You can't give: {', '.join(not_allowed)}.")
         return value
 
+    # The built-in roles always keep their kind (company role or EUCL role)
+    FIXED_KIND = {
+        Role.SUPER_ADMIN: False, Role.EMPLOYEE: False, Role.HR: False, Role.ME_OFFICER: False,
+        Role.COMPANY_BOSS: True, Role.RECEPTIONIST: True,
+    }
+
     def validate(self, attrs):
-        if self.instance is not None and self.instance.code == Role.SUPER_ADMIN:
-            # Never a company role. Every permission, "Manage users & roles"
-            # included, may be switched off (the app asks first for that one).
-            attrs.pop("is_company_role", None)
-        if self.instance is not None and self.instance.code == Role.EMPLOYEE:
-            if attrs.get("is_company_role"):
-                raise serializers.ValidationError("The Employee role can't be a company role.")
+        role = self.instance
+        code = role.code if role is not None else None
         if not self._is_admin():
             # A boss's roles are always company roles of their own company
-            attrs["is_company_role"] = True
-            if self.instance is None:
+            kind = True
+            if role is None:
                 attrs["company"] = get_company(self.context["request"].user)
                 if attrs["company"] is None:
                     raise serializers.ValidationError("Your account is not linked to a company.")
+        elif code in self.FIXED_KIND:
+            kind = self.FIXED_KIND[code]
+        elif role is not None and role.company_id is not None:
+            kind = True  # a company's own role
+        else:
+            # EUCL chooses: "EUCL staff" or "Company staff"
+            kind = bool(attrs.get("is_company_role", role.is_company_role if role is not None else False))
+        if role is not None and kind != role.is_company_role and role.profiles.exists():
+            raise serializers.ValidationError(
+                {"is_company_role": "People have this role: give them another role before changing who it is for."}
+            )
+        attrs["is_company_role"] = kind
         return attrs
 
     def create(self, validated_data):
@@ -223,30 +236,7 @@ class RoleSerializer(serializers.ModelSerializer):
         while Role.objects.filter(code=code).exists():
             code, number = f"{base}_{number}", number + 1
         validated_data["code"] = code
-        return self._set_kind(super().create(validated_data))
-
-    def update(self, instance, validated_data):
-        return self._set_kind(super().update(instance, validated_data))
-
-    @staticmethod
-    def _set_kind(role):
-        """
-        Nobody ticks "company role" any more: a role whose permissions are all
-        company permissions is a company role (its users must work for a
-        company). Employee and Super admin never are; a company's own roles
-        always are.
-        """
-        if role.code in (Role.EMPLOYEE, Role.SUPER_ADMIN):
-            kind = False
-        elif role.company_id is not None:
-            kind = True
-        else:
-            areas = set(role.permissions.values_list("area", flat=True))
-            kind = bool(areas) and areas == {"Company"}
-        if role.is_company_role != kind:
-            role.is_company_role = kind
-            role.save(update_fields=["is_company_role"])
-        return role
+        return super().create(validated_data)
 
 
 # ------------------------------------------------------------- companies

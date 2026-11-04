@@ -1,5 +1,15 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react'
-import api, { tokens } from '../api/client'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import api, { setActingCompany, tokens } from '../api/client'
+
+const ACTING_KEY = 'wms_acting_company'
+
+function readChosen() {
+  try {
+    return localStorage.getItem(ACTING_KEY)
+  } catch {
+    return null
+  }
+}
 
 const AuthContext = createContext(null)
 
@@ -8,6 +18,8 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   // True while we check a saved token when the page loads
   const [loading, setLoading] = useState(() => Boolean(tokens.access))
+  // The company chosen for the company pages by someone not linked to one
+  const [chosenCompanyId, setChosenCompanyId] = useState(readChosen)
 
   const loadMe = useCallback(async () => {
     const { data } = await api.get('/me/')
@@ -18,7 +30,7 @@ export function AuthProvider({ children }) {
 
   // Permissions are switched on and off by the super admin while people are
   // signed in: read them again when the tab comes back into view and every
-  // 30 seconds, so menus and pages follow the role without signing out.
+  // 15 seconds, so menus and pages follow the role without signing out.
   const signedIn = Boolean(user)
   useEffect(() => {
     if (!signedIn) return undefined
@@ -27,7 +39,7 @@ export function AuthProvider({ children }) {
     }
     window.addEventListener('focus', refresh)
     document.addEventListener('visibilitychange', refresh)
-    const timer = window.setInterval(refresh, 30000)
+    const timer = window.setInterval(refresh, 15000)
     return () => {
       window.removeEventListener('focus', refresh)
       document.removeEventListener('visibilitychange', refresh)
@@ -63,8 +75,31 @@ export function AuthProvider({ children }) {
     setUser(null)
   }
 
+  // Any role may have company permissions. Someone not linked to a company
+  // (e.g. HR) works on the company pages of the company they choose: for the
+  // pages, `user.company` is that company and `user.acting_company` is true.
+  const effectiveUser = useMemo(() => {
+    const choices = user?.company_choices ?? []
+    if (!user || user.company || choices.length === 0) {
+      setActingCompany(null)
+      return user
+    }
+    const company = choices.find((c) => String(c.id) === String(chosenCompanyId)) ?? choices[0]
+    setActingCompany(company.id) // before any page sends its first request
+    return { ...user, company, acting_company: true }
+  }, [user, chosenCompanyId])
+
+  const chooseCompany = useCallback((id) => {
+    try {
+      localStorage.setItem(ACTING_KEY, String(id))
+    } catch {
+      // private window: the choice lasts until the page is reloaded
+    }
+    setChosenCompanyId(String(id))
+  }, [])
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, reloadUser: loadMe }}>
+    <AuthContext.Provider value={{ user: effectiveUser, loading, login, logout, reloadUser: loadMe, chooseCompany }}>
       {children}
     </AuthContext.Provider>
   )

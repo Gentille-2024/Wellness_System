@@ -1,3 +1,5 @@
+from contextvars import ContextVar
+
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import BasePermission, SAFE_METHODS
 
@@ -133,10 +135,75 @@ def has_perm(user, *codes):
     return bool(get_permissions(user) & set(codes))
 
 
-def get_company(user):
-    """The service provider a company staff member works for, or None."""
+# ---------------------------------------------------------------------------
+# Any role may have any permission. Company permissions open the company
+# pages; someone who isn't linked to a company (e.g. HR with "Take employees'
+# attendance") chooses which company those pages are for. The app sends that
+# choice in the X-Acting-Company header (ActingCompanyMiddleware keeps it for
+# the request); it only counts for people who have a company permission.
+# ---------------------------------------------------------------------------
+_acting_company_id = ContextVar("acting_company_id", default=None)
+
+
+class ActingCompanyMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        token = _acting_company_id.set(request.headers.get("X-Acting-Company"))
+        try:
+            return self.get_response(request)
+        finally:
+            _acting_company_id.reset(token)
+
+
+def company_permission_codes():
+    from .models import Permission
+
+    return set(Permission.objects.filter(area="Company").values_list("code", flat=True))
+
+
+def own_role_permissions(profile):
+    """What the user's roles give them, without the Super admin role (as /api/me/ role_permissions)."""
+    from .models import Role
+
+    return set(
+        active_roles(profile).exclude(code=Role.SUPER_ADMIN)
+        .values_list("permissions__code", flat=True).exclude(permissions__code=None)
+    )
+
+
+def company_choices(user):
+    """The companies someone not linked to a company may open company pages for (none if they can't)."""
+    from .models import Company
+
     profile = getattr(user, "userprofile", None)
-    return profile.company if profile else None
+    if profile is None or profile.company_id is not None:
+        return Company.objects.none()
+    if not own_role_permissions(profile) & company_permission_codes():
+        return Company.objects.none()
+    return Company.objects.filter(deleted_at__isnull=True).order_by("name")
+
+
+def get_company(user):
+    """
+    The service provider whose company pages this user works on: the company
+    they work for, or, for someone not linked to one, the company they chose.
+    """
+    profile = getattr(user, "userprofile", None)
+    if profile is None:
+        return None
+    if profile.company_id is not None:
+        return profile.company
+    raw = _acting_company_id.get()
+    if not raw or not str(raw).isdigit():
+        return None
+    cached = getattr(user, "_acting_company", None)
+    if cached is not None and str(cached.pk) == str(raw):
+        return cached
+    company = company_choices(user).filter(pk=int(raw)).first()
+    user._acting_company = company
+    return company
 
 
 class PermissionRequired(BasePermission):

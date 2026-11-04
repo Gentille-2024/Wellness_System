@@ -445,7 +445,7 @@ function RolesTab({ initialRoleId = null }) {
       <Alert>{deleting ? '' : actionError || roles.error || permissions.error}</Alert>
 
       <div className="card-header-bar">
-        <p className="muted">Choose a role to see every permission and switch them on or off. Each user has one role and gets its permissions.</p>
+        <p className="muted">Choose a role to see every permission and switch them on or off. Each user has one role and gets its permissions: a change shows on their account within seconds.</p>
         <div className="page-actions">
           <button type="button" className="btn btn-secondary" onClick={() => setAddingPermission(true)}>
             <Icon name="plus" size={16} /> New permission

@@ -126,6 +126,8 @@ LOGIN_URL = "accounts:login"
 LOGIN_REDIRECT_URL = "dashboards:overview"
 SESSION_COOKIE_AGE = int(env("SESSION_HOURS", "8")) * 3600
 SESSION_COOKIE_HTTPONLY = True
+# Behind Railway's (or any) HTTPS proxy, which says so in this header
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SESSION_COOKIE_SECURE = env_bool("SECURE_COOKIES", False)
 CSRF_COOKIE_SECURE = env_bool("SECURE_COOKIES", False)
 

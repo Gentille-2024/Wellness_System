@@ -14,6 +14,8 @@ import os
 from pathlib import Path
 from datetime import timedelta
 
+import dj_database_url
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 def load_env_file(path):
@@ -38,20 +40,47 @@ from corsheaders.defaults import default_headers  # noqa: E402
 # The app sends the company chosen for the company pages in this header
 CORS_ALLOW_HEADERS = (*default_headers, "x-acting-company")
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
+# The websites allowed to call this API from the browser: the React app on
+# this computer, plus (comma separated, e.g. on Railway) CORS_ALLOWED_ORIGINS
+CORS_ALLOWED_ORIGINS = ["http://localhost:5173"] + [
+    origin.strip().rstrip("/") for origin in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if origin.strip()
 ]
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
+# Read from environment variables (on Railway: the service's Variables; on
+# this computer: .env). Both the DJANGO_ names and the short names work.
+def env(*names, default=None):
+    for name in names:
+        value = os.environ.get(name)
+        if value not in (None, ""):
+            return value
+    return default
+
+
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
+SECRET_KEY = env("DJANGO_SECRET_KEY", "SECRET_KEY")
+if not SECRET_KEY:
+    raise KeyError("Set DJANGO_SECRET_KEY (or SECRET_KEY) in the environment or in .env")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get("DJANGO_DEBUG", "False") == "True"
+DEBUG = str(env("DJANGO_DEBUG", "DEBUG", default="False")).strip().lower() in {"1", "true", "yes", "on"}
 
-ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in env("DJANGO_ALLOWED_HOSTS", "ALLOWED_HOSTS", default="localhost,127.0.0.1").split(",")
+    if host.strip()
+]
+
+# Railway's proxy handles HTTPS and says so in this header
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Forms and the Django admin over HTTPS on Railway (plus any extra origins,
+# comma separated, in CSRF_TRUSTED_ORIGINS)
+CSRF_TRUSTED_ORIGINS = ['https://*.up.railway.app'] + [
+    origin.strip() for origin in env("CSRF_TRUSTED_ORIGINS", default="").split(",") if origin.strip()
+]
 
 
 # Application definition
@@ -72,6 +101,8 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    # Serves the collected static files (the Django admin's CSS/JS) with gunicorn
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -105,16 +136,21 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.environ.get("DB_NAME", "wellness_db"),
-        'USER': os.environ.get("DB_USER", "root"),
-        'PASSWORD': os.environ["DB_PASSWORD"],
-        'HOST': os.environ.get("DB_HOST", "localhost"),
-        'PORT': os.environ.get("DB_PORT", "3306"),
+# DATABASE_URL (e.g. on Railway: ${{MySQL.MYSQL_URL}}) wins; without it the
+# DB_* values from .env are used, as on this computer.
+if env("DATABASE_URL"):
+    DATABASES = {"default": dj_database_url.parse(env("DATABASE_URL"), conn_max_age=600, conn_health_checks=True)}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': os.environ.get("DB_NAME", "wellness_db"),
+            'USER': os.environ.get("DB_USER", "root"),
+            'PASSWORD': os.environ["DB_PASSWORD"],
+            'HOST': os.environ.get("DB_HOST", "localhost"),
+            'PORT': os.environ.get("DB_PORT", "3306"),
+        }
     }
-}
 
 
 # Password validation
@@ -152,6 +188,8 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
+# Where "python manage.py collectstatic" puts the files WhiteNoise serves
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 
 # Email

@@ -25,7 +25,14 @@ case "$1" in
   web)
     wait_for_db
     python manage.py migrate --noinput
-    exec gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers "${GUNICORN_WORKERS:-3}" --timeout 120 --access-logfile -
+    # RUN_WORKER_IN_WEB=1 (Railway): the Celery worker and beat run in this
+    # service too, so report files land on the same disk the website reads.
+    if [ "${RUN_WORKER_IN_WEB:-0}" = "1" ]; then
+      celery -A config worker --beat --loglevel "${LOG_LEVEL:-INFO}" --concurrency "${CELERY_CONCURRENCY:-1}" \
+        --schedule /tmp/celerybeat-schedule &
+    fi
+    # Railway gives the port in $PORT; Docker Compose uses 8000
+    exec gunicorn config.wsgi:application --bind "0.0.0.0:${PORT:-8000}" --workers "${GUNICORN_WORKERS:-3}" --timeout 120 --access-logfile -
     ;;
   worker)
     wait_for_db

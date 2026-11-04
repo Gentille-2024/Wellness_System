@@ -3,6 +3,7 @@
 .env.local
 
 # Python
+staticfiles/
 venv/
 __pycache__/
 *.pyc

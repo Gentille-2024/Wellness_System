@@ -22,8 +22,11 @@ export const tokens = {
   },
 }
 
-// Every request made with `api` goes to /api/... (forwarded to Django by Vite)
-const api = axios.create({ baseURL: '/api' })
+// Where the API is. On this computer: /api (Vite forwards it to Django).
+// Online (Railway): the API's own address, set at build time in VITE_API_URL,
+// e.g. https://wellness-api-production.up.railway.app/api
+export const API_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/+$/, '')
+const api = axios.create({ baseURL: API_URL })
 
 // Someone not linked to a company who has company permissions (e.g. HR)
 // chooses which company the company pages are for; every request says which.
@@ -60,7 +63,7 @@ api.interceptors.response.use(
       try {
         // If several requests fail at once, they all wait for ONE refresh
         refreshPromise ??= axios
-          .post('/api/token/refresh/', { refresh: tokens.refresh })
+          .post(`${API_URL}/token/refresh/`, { refresh: tokens.refresh })
           .finally(() => {
             refreshPromise = null
           })

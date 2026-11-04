@@ -1,0 +1,13 @@
+# Only the Django API goes into this image
+.git
+.env
+.env.*
+venv
+**/__pycache__
+**/*.pyc
+staticfiles
+frontend
+me_tool
+*.sqlite3
+.vscode
+.idea

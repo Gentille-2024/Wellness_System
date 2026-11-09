@@ -12,6 +12,7 @@ from django.utils.text import slugify
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from django.contrib.auth.models import update_last_login
 
 from .models import (
     PriceChange,
@@ -1045,6 +1046,9 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         data = super().validate(attrs)
         if company_deactivated(self.user):
             raise AuthenticationFailed({"detail": COMPANY_DEACTIVATED, "code": "company_deactivated"})
+        # Record the sign-in time (shown as "Last login" on Users & roles).
+        # SimpleJWT skips this by default, so only Django admin logins were saved.
+        update_last_login(None, self.user)
         data["username"] = self.user.username
         data["user_id"] = self.user.id
         data["permissions"] = sorted(get_permissions(self.user))

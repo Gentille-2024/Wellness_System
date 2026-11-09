@@ -9,12 +9,14 @@ export function formatTime(isoDateTime) {
 // "2026-09-24T13:53:27+02:00" -> "24 Sep 2026, 13:53"
 export function formatDateTime(isoDateTime) {
   if (!isoDateTime) return '—'
-  return new Date(isoDateTime).toLocaleString([], {
+  // Always e.g. "Sep 28, 2026, 02:11 PM", whatever the browser's language
+  return new Date(isoDateTime).toLocaleString('en-US', {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    hour12: true,
   })
 }
 
